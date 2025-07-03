@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: Fondazione Istituto Italiano di Tecnologia (IIT)
 # SPDX-License-Identifier: BSD-2-Clause
 
-cmake_minimum_required(VERSION 3.8...3.30)
+cmake_minimum_required(VERSION 3.22.1...3.30)
 project(
     isaac-sim-yarp-bridge
     VERSION 0.0.1
