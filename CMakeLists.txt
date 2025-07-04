@@ -64,9 +64,11 @@ set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 set(CMAKE_C_EXTENSIONS OFF)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
-# YARP
-find_package(YCM REQUIRED)
-find_package(YARP REQUIRED)
+# find python before python3
+# Workaround for https://github.com/ami-iit/isaac-sim-yarp-bridge/pull/1#issuecomment-3033075842
+# and https://github.com/conda-forge/python-feedstock/issues/349, https://github.com/python/cpython/issues/99185
+find_package(Python REQUIRED)
+set(Python3_EXECUTABLE ${Python_EXECUTABLE})
 
 # ROS2
 find_package(ament_cmake REQUIRED)
@@ -74,6 +76,10 @@ find_package(rclcpp REQUIRED)
 find_package(std_msgs REQUIRED)
 find_package(sensor_msgs REQUIRED)
 find_package(geometry_msgs REQUIRED)
+
+# YARP
+find_package(YCM REQUIRED)
+find_package(YARP REQUIRED)
 
 option(BUILD_TESTING "Create tests using CMake" OFF)
 if(BUILD_TESTING)
