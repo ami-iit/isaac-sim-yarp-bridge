@@ -33,7 +33,17 @@ jobs:
       run: |
         # Workaround for https://github.com/conda-incubator/setup-miniconda/issues/186
         conda config --remove channels defaults
-        conda install cxx-compiler cmake pkg-config make ninja colcon-common-extensions catkin_tools rosdep ros-humble-desktop yarp
+        conda install colcon-common-extensions catkin_tools rosdep ros-humble-desktop
+
+    - name: Environment variables (after ROS only)
+      run: |
+        env
+
+    - name: Dependencies
+      run: |
+        # Workaround for https://github.com/conda-incubator/setup-miniconda/issues/186
+        conda config --remove channels defaults
+        conda install cxx-compiler cmake pkg-config make ninja yarp
 
     - name: Environment variables
       run: |
