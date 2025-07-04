@@ -39,10 +39,19 @@ jobs:
       run: |
         env
 
+    - name: cmd test
+      if: contains(matrix.os, 'windows')
+      shell: cmd /C CALL {0}
+      run: |
+        echo "---------------"
+        set
+        echo "==============="
+        call %CONDA_PREFIX%\etc\conda\activate.d\ros-humble-ros-workspace_activate.bat
+        echo "+++++++++++++++"
+        set
     - name: Dependencies
       run: |
         # Workaround for https://github.com/conda-incubator/setup-miniconda/issues/186
-        conda config --remove channels defaults
         conda install cxx-compiler cmake pkg-config make ninja yarp
 
     - name: Environment variables
