@@ -15,6 +15,7 @@
 
 #include <memory>
 #include <mutex>
+#include <atomic>
 
 #include "IsaacSimRGBDSensorNWCROS2_ParamsParser.h"
 
@@ -75,10 +76,7 @@ private:
     class RGBDSubscriber : public rclcpp::Node
     {
     public:
-        RGBDSubscriber(const std::string& name, const std::string& rgbTopic, const std::string& depthTopic);
-
-        bool getImages(yarp::sig::FlexImage& colorFrame, yarp::sig::ImageOf<yarp::sig::PixelFloat>& depthFrame, yarp::os::Stamp* colorStamp = NULL, yarp::os::Stamp* depthStamp = NULL);
-
+        RGBDSubscriber(const std::string& name, const std::string& rgbTopic, const std::string& depthTopic, IsaacSimRGBDSensorNWCROS2* parent);
     private:
         typedef message_filters::sync_policies::ApproximateTime<
             sensor_msgs::msg::Image,
@@ -91,10 +89,19 @@ private:
         message_filters::Subscriber<sensor_msgs::msg::Image> m_rgb_sub;
         message_filters::Subscriber<sensor_msgs::msg::Image> m_depth_sub;
         std::shared_ptr<message_filters::Synchronizer<SyncPolicy>> m_sync;
-        std::mutex m_mutex;
+        IsaacSimRGBDSensorNWCROS2* m_parent; // Pointer to the parent device to call updateImages
     };
+
+    void updateImages(const sensor_msgs::msg::Image::ConstSharedPtr& rgb,
+        const sensor_msgs::msg::Image::ConstSharedPtr& depth);
 
     IsaacSimRGBDSensorNWCROS2_ParamsParser m_paramsParser;
     std::shared_ptr<RGBDSubscriber> m_subscriber;
+    std::atomic<bool> m_receivedOnce{ false };
+    yarp::os::Stamp m_rgbTimestamp;
+    yarp::os::Stamp m_depthTimestamp;
+    yarp::sig::FlexImage m_rgbImage;
+    yarp::sig::ImageOf<yarp::sig::PixelFloat> m_depthImage;
+    std::mutex m_mutex;
 };
 #endif

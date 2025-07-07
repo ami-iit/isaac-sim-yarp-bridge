@@ -2,6 +2,8 @@
 // SPDX-License-Identifier: BSD-2-Clause
 #include "IsaacSimRGBDSensorNWCROS2.h"
 #include <yarp/os/LogComponent.h>
+#include <yarp/os/LogStream.h>
+#include <sensor_msgs/image_encodings.hpp>
 
 YARP_DECLARE_LOG_COMPONENT(RGBD)
 YARP_LOG_COMPONENT(RGBD, "yarp.device.IsaacSimRGBDSensorNWCROS2")
@@ -20,7 +22,7 @@ bool yarp::dev::IsaacSimRGBDSensorNWCROS2::open(yarp::os::Searchable& config)
     }
 
     rclcpp::init(0, nullptr);
-    m_subscriber = std::make_shared<RGBDSubscriber>(m_paramsParser.m_node_name, m_paramsParser.m_rgb_topic_name, m_paramsParser.m_depth_topic_name);
+    m_subscriber = std::make_shared<RGBDSubscriber>(m_paramsParser.m_node_name, m_paramsParser.m_rgb_topic_name, m_paramsParser.m_depth_topic_name, this);
     rclcpp::spin(m_subscriber);
 
     return true;
@@ -28,6 +30,12 @@ bool yarp::dev::IsaacSimRGBDSensorNWCROS2::open(yarp::os::Searchable& config)
 
 bool yarp::dev::IsaacSimRGBDSensorNWCROS2::close()
 {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    m_receivedOnce = false;
+    if (m_subscriber)
+    {
+        m_subscriber.reset();
+    }
     rclcpp::shutdown();
     return true;
 }
@@ -172,9 +180,81 @@ std::string yarp::dev::IsaacSimRGBDSensorNWCROS2::getLastErrorMsg(yarp::os::Stam
     return std::string();
 }
 
-yarp::dev::IsaacSimRGBDSensorNWCROS2::RGBDSubscriber::RGBDSubscriber(const std::string& name, const std::string& rgbTopic, const std::string& depthTopic)
+void yarp::dev::IsaacSimRGBDSensorNWCROS2::updateImages(const sensor_msgs::msg::Image::ConstSharedPtr& rgb, const sensor_msgs::msg::Image::ConstSharedPtr& depth)
+{
+    // The code of these conversions have been ispired from
+    // https://github.com/robotology/yarp-devices-ros2/blob/e1b9c86aa91c0fb3a14c6d2415e75c3868e222dc/src/devices/ros2RGBDConversionUtils/Ros2RGBDConversionUtils.cpp
+
+    std::lock_guard<std::mutex> lock(m_mutex);
+
+    const auto& rosPixelType = rgb->encoding;
+    int yarpPixelType = VOCAB_PIXEL_INVALID;
+
+    if (rosPixelType == sensor_msgs::image_encodings::RGB8)
+    {
+        yarpPixelType = VOCAB_PIXEL_RGB;
+    }
+    else if (rosPixelType == sensor_msgs::image_encodings::BGR8)
+    {
+        yarpPixelType = VOCAB_PIXEL_BGR;
+    }
+    else
+    {
+        yCError(RGBD) << "Unsupported RGB pixel type:" << rosPixelType;
+        return;
+    }
+    m_rgbImage.setQuantum(0);
+    m_rgbImage.setPixelCode(yarpPixelType);
+    m_rgbImage.setPixelSize(rgb->step / rgb->width); // The step is a full row length in bytes
+    m_rgbImage.resize(rgb->width, rgb->height);
+    size_t c = 0;
+    unsigned char* rgbData = m_rgbImage.getRawImage();
+    for (auto it = rgb->data.begin(); it != rgb->data.end(); it++)
+    {
+        rgbData[c++] = *it;
+    }
+    m_rgbTimestamp.update(rgb->header.stamp.sec + (rgb->header.stamp.nanosec / 1e9));
+
+    if (depth->encoding == sensor_msgs::image_encodings::TYPE_16UC1)
+    {
+        m_depthImage.resize(depth->width, depth->height);
+        size_t c = 0;
+        uint16_t* p = (uint16_t*)(depth->data.data());
+        uint16_t* siz = (uint16_t*)(depth->data.data()) + (depth->data.size() / sizeof(uint16_t));
+        unsigned char* depthData = m_depthImage.getRawImage();
+        int count = 0;
+        for (; p < siz; p++)
+        {
+            float value = static_cast<float>(*p) / 1000.0; // Convert from millimeters to meters, since the input is a 16-bit unsigned integer
+            ((float*)(depthData))[c++] = value;
+            count++;
+        }
+    }
+    else if (depth->encoding == sensor_msgs::image_encodings::TYPE_32FC1)
+    {
+        m_depthImage.resize(depth->width, depth->height);
+        unsigned char* depthData = m_depthImage.getRawImage();
+        size_t c = 0;
+        for (auto it = depth->data.begin(); it != depth->data.end(); it++)
+        {
+            depthData[c++] = *it;
+        }
+    }
+    else
+    {
+        yCError(RGBD) << "Unsupported depth format:" << rosPixelType;
+        return;
+    }
+    m_depthTimestamp.update(depth->header.stamp.sec + (depth->header.stamp.nanosec / 1e9));
+
+    m_receivedOnce = true;
+}
+
+yarp::dev::IsaacSimRGBDSensorNWCROS2::RGBDSubscriber::RGBDSubscriber(const std::string& name, const std::string& rgbTopic, const std::string& depthTopic, IsaacSimRGBDSensorNWCROS2* parent)
     : Node(name)
 {
+    m_parent = parent; // Store the parent device pointer
+
     // Create message_filters subscribers
     m_rgb_sub.subscribe(this, rgbTopic);
     m_depth_sub.subscribe(this, depthTopic);
@@ -187,14 +267,7 @@ yarp::dev::IsaacSimRGBDSensorNWCROS2::RGBDSubscriber::RGBDSubscriber(const std::
     m_sync->registerCallback(std::bind(&RGBDSubscriber::callback, this, std::placeholders::_1, std::placeholders::_2));
 }
 
-bool yarp::dev::IsaacSimRGBDSensorNWCROS2::RGBDSubscriber::getImages(yarp::sig::FlexImage& colorFrame, yarp::sig::ImageOf<yarp::sig::PixelFloat>& depthFrame, yarp::os::Stamp* colorStamp, yarp::os::Stamp* depthStamp)
-{
-    std::lock_guard<std::mutex> lock(m_mutex);
-    return false;
-}
-
 void yarp::dev::IsaacSimRGBDSensorNWCROS2::RGBDSubscriber::callback(const sensor_msgs::msg::Image::ConstSharedPtr& rgb, const sensor_msgs::msg::Image::ConstSharedPtr& depth)
 {
-    std::lock_guard<std::mutex> lock(m_mutex);
-
+    m_parent->updateImages(rgb, depth);
 }
