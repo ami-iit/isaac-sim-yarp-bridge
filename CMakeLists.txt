@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: Fondazione Istituto Italiano di Tecnologia (IIT)
 # SPDX-License-Identifier: BSD-2-Clause
 
-cmake_minimum_required(VERSION 3.8...3.30)
+cmake_minimum_required(VERSION 3.20...3.30)
 project(
     isaac-sim-yarp-bridge
     VERSION 0.0.1
@@ -64,11 +64,9 @@ set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 set(CMAKE_C_EXTENSIONS OFF)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
-# find python before python3
 # Workaround for https://github.com/ami-iit/isaac-sim-yarp-bridge/pull/1#issuecomment-3033075842
 # and https://github.com/conda-forge/python-feedstock/issues/349, https://github.com/python/cpython/issues/99185
-find_package(Python REQUIRED)
-set(Python3_EXECUTABLE ${Python_EXECUTABLE})
+set(Python3_FIND_UNVERSIONED_NAMES FIRST)
 
 # ROS2
 find_package(ament_cmake REQUIRED)
