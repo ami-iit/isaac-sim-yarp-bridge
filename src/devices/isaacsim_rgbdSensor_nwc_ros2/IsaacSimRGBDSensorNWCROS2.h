@@ -16,6 +16,7 @@
 #include <memory>
 #include <mutex>
 #include <atomic>
+#include <sstream>
 
 #include "IsaacSimRGBDSensorNWCROS2_ParamsParser.h"
 
@@ -31,7 +32,7 @@ class yarp::dev::IsaacSimRGBDSensorNWCROS2 :
 {
 
 public:
-    IsaacSimRGBDSensorNWCROS2();
+    IsaacSimRGBDSensorNWCROS2() = default;
     ~IsaacSimRGBDSensorNWCROS2() override = default;
 
     // DeviceDriver
@@ -92,6 +93,18 @@ private:
         IsaacSimRGBDSensorNWCROS2* m_parent; // Pointer to the parent device to call updateImages
     };
 
+    class ErrorHandler
+    {
+        std::string m_lastErrorMsg;
+        std::string m_prefix;
+        yarp::os::Stamp m_errorTimestamp;
+    public:
+        void setPrefix(const std::string& prefix);
+        void operator << (const std::string& errorMsg);
+        void operator << (const std::stringstream& errorMsg);
+        const std::string& getLastErrorMsg() const;
+    };
+
     void updateImages(const sensor_msgs::msg::Image::ConstSharedPtr& rgb,
         const sensor_msgs::msg::Image::ConstSharedPtr& depth);
 
@@ -102,6 +115,7 @@ private:
     yarp::os::Stamp m_depthTimestamp;
     yarp::sig::FlexImage m_rgbImage;
     yarp::sig::ImageOf<yarp::sig::PixelFloat> m_depthImage;
+    ErrorHandler m_errorHandler;
     std::mutex m_mutex;
 };
 #endif

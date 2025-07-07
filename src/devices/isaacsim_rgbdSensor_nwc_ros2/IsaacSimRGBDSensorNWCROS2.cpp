@@ -9,15 +9,12 @@ YARP_DECLARE_LOG_COMPONENT(RGBD)
 YARP_LOG_COMPONENT(RGBD, "yarp.device.IsaacSimRGBDSensorNWCROS2")
 
 
-yarp::dev::IsaacSimRGBDSensorNWCROS2::IsaacSimRGBDSensorNWCROS2()
-{
-}
-
 bool yarp::dev::IsaacSimRGBDSensorNWCROS2::open(yarp::os::Searchable& config)
 {
+    m_errorHandler.setPrefix("[open] ");
     if (!m_paramsParser.parseParams(config))
     {
-        yCError(RGBD, "Failed to parse parameters for IsaacSimRGBDSensorNWCROS2");
+        m_errorHandler << "Failed to parse parameters for IsaacSimRGBDSensorNWCROS2";
         return false;
     }
 
@@ -157,27 +154,82 @@ bool yarp::dev::IsaacSimRGBDSensorNWCROS2::getExtrinsicParam(yarp::sig::Matrix& 
 
 bool yarp::dev::IsaacSimRGBDSensorNWCROS2::getRgbImage(yarp::sig::FlexImage& rgbImage, yarp::os::Stamp* timeStamp)
 {
-    return false;
+    std::lock_guard<std::mutex> lock(m_mutex);
+    m_errorHandler.setPrefix("[getRgbImage] ");
+    if (!m_receivedOnce)
+    {
+        m_errorHandler << "No images received yet. Please ensure the ROS2 topics are publishing data.";
+        return false;
+    }
+
+    if (timeStamp != nullptr)
+    {
+        *timeStamp = m_rgbTimestamp;
+    }
+
+    rgbImage = m_rgbImage;
+
+    return true;
 }
 
 bool yarp::dev::IsaacSimRGBDSensorNWCROS2::getDepthImage(yarp::sig::ImageOf<yarp::sig::PixelFloat>& depthImage, yarp::os::Stamp* timeStamp)
 {
-    return false;
+    std::lock_guard<std::mutex> lock(m_mutex);
+    m_errorHandler.setPrefix("[getDepthImage] ");
+    if (!m_receivedOnce)
+    {
+        m_errorHandler << "No images received yet. Please ensure the ROS2 topics are publishing data.";
+        return false;
+    }
+
+    if (timeStamp != nullptr)
+    {
+        *timeStamp = m_depthTimestamp;
+    }
+
+    depthImage = m_depthImage;
+
+    return true;
 }
 
 bool yarp::dev::IsaacSimRGBDSensorNWCROS2::getImages(yarp::sig::FlexImage& colorFrame, yarp::sig::ImageOf<yarp::sig::PixelFloat>& depthFrame, yarp::os::Stamp* colorStamp, yarp::os::Stamp* depthStamp)
 {
-    return false;
+    std::lock_guard<std::mutex> lock(m_mutex);
+    m_errorHandler.setPrefix("[getImages] ");
+    if (!m_receivedOnce)
+    {
+        m_errorHandler << "No images received yet. Please ensure the ROS2 topics are publishing data.";
+        return false;
+    }
+
+    if (colorStamp != nullptr)
+    {
+        *colorStamp = m_rgbTimestamp;
+    }
+    if (depthStamp != nullptr)
+    {
+        *depthStamp = m_depthTimestamp;
+    }
+
+    colorFrame = m_rgbImage;
+    depthFrame = m_depthImage;
+
+    return true;
 }
 
 yarp::dev::IRGBDSensor::RGBDSensor_status yarp::dev::IsaacSimRGBDSensorNWCROS2::getSensorStatus()
 {
-    return RGBDSensor_status();
+    if (!m_receivedOnce)
+    {
+        return RGBDSensor_status::RGBD_SENSOR_NOT_READY;
+    }
+    return RGBDSensor_status::RGBD_SENSOR_OK_IN_USE;
 }
 
 std::string yarp::dev::IsaacSimRGBDSensorNWCROS2::getLastErrorMsg(yarp::os::Stamp* timeStamp)
 {
-    return std::string();
+    std::lock_guard<std::mutex> lock(m_mutex);
+    return m_errorHandler.getLastErrorMsg();
 }
 
 void yarp::dev::IsaacSimRGBDSensorNWCROS2::updateImages(const sensor_msgs::msg::Image::ConstSharedPtr& rgb, const sensor_msgs::msg::Image::ConstSharedPtr& depth)
@@ -270,4 +322,27 @@ yarp::dev::IsaacSimRGBDSensorNWCROS2::RGBDSubscriber::RGBDSubscriber(const std::
 void yarp::dev::IsaacSimRGBDSensorNWCROS2::RGBDSubscriber::callback(const sensor_msgs::msg::Image::ConstSharedPtr& rgb, const sensor_msgs::msg::Image::ConstSharedPtr& depth)
 {
     m_parent->updateImages(rgb, depth);
+}
+
+void yarp::dev::IsaacSimRGBDSensorNWCROS2::ErrorHandler::setPrefix(const std::string& prefix)
+{
+    m_prefix = prefix;
+    m_lastErrorMsg.clear();
+}
+
+void yarp::dev::IsaacSimRGBDSensorNWCROS2::ErrorHandler::operator<<(const std::string& errorMsg)
+{
+    m_lastErrorMsg = m_prefix + errorMsg;
+    m_errorTimestamp.update();
+    yCError(RGBD, "%s", m_lastErrorMsg.c_str());
+}
+
+void yarp::dev::IsaacSimRGBDSensorNWCROS2::ErrorHandler::operator<<(const std::stringstream& errorMsg)
+{
+    this->operator<<(errorMsg.str());
+}
+
+const std::string& yarp::dev::IsaacSimRGBDSensorNWCROS2::ErrorHandler::getLastErrorMsg() const
+{
+     return m_lastErrorMsg;
 }
