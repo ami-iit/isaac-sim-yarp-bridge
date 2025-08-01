@@ -15,6 +15,10 @@
 # - FTFrame [target] The link with respect to which express the measure, e.g. /World/ergoCubSN002/l_foot_front_ft
 # - flipMeasure [bool] A boolean to flip the measurement. By default (false), the measured wrench is the one exerted by the FT.
 
+# Expects two outputs:
+# - force [double[3]] The measured force
+# - torque [double[3]] The measured torque
+
 import isaacsim.core.utils.stage as stage_utils
 import isaacsim.core.utils.transformations as transformations_utils
 import numpy as np
