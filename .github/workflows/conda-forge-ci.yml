@@ -26,13 +26,13 @@ jobs:
       with:
         miniforge-variant: Miniforge3
         miniforge-version: latest
-        channels: conda-forge,robostack-humble
+        channels: conda-forge,robostack-jazzy
         channel-priority: true
         conda-remove-defaults: true
 
     - name: Dependencies
       run: |
-        conda install cxx-compiler cmake pkg-config make ninja colcon-common-extensions catkin_tools rosdep ros-humble-desktop yarp
+        conda install cxx-compiler cmake pkg-config make ninja colcon-common-extensions catkin_tools rosdep ros-jazzy-desktop yarp
 
     - name: Environment [Linux]
       if: contains(matrix.os, 'ubuntu')
