@@ -1,8 +1,18 @@
 import omni.graph.core as og
+import dataclasses
+
+
+@dataclasses.dataclass
+class Camera:
+    prefix: str
+    suffix: str
+    type: str
+    target: str
 
 
 class Settings:
     def __init__(self):
+        self.graph_path = "/action_graph"
         self.robot_path = "/World/ergoCubSN002/ergoCubSN002"
         self.articulation_root = self.robot_path + "/root_link"
         self.topic_prefix = "/ergocub"
@@ -10,6 +20,22 @@ class Settings:
             "waist_imu_0": self.robot_path + "/waist_imu_0/waist_imu_0",
             "head_imu_0": self.robot_path + "/head_imu_0/head_imu_0",
         }
+        realsense_prefix = "/World/ergoCubSN002/ergoCubSN002/realsense/"
+        self.cameras = [
+            Camera(
+                prefix="realsense",
+                suffix="rgb",
+                type="rgb",
+                target=realsense_prefix
+                + "rsd455/RSD455/Camera_OmniVision_OV9782_Color",
+            ),
+            Camera(
+                prefix="realsense",
+                suffix="depth",
+                type="depth",
+                target=realsense_prefix + "rsd455/RSD455/Camera_Pseudo_Depth",
+            ),
+        ]
 
 
 def merge_actions(action_list):
@@ -48,6 +74,15 @@ def add_ros2_clock_publisher(graph_keys):
             ),
         ],
     }
+
+
+# When creating nodes, first you specify the name of the node, and then the type of
+# node. If instead of the type, you pass a dict with a series of other actions, you
+# are creating a compound node instead (basically a subgraph). The inputs and
+# outputs of a compound node are defined by "promoting" inputs and outputs of the
+# internal nodes. If multiple internal nodes need to be connected to the same
+# input/outputs, this connection is done explicitly after creating the compound,
+# using the compound name.
 
 
 def add_ros2_joint_compound(graph_keys, settings):
@@ -234,74 +269,87 @@ def create_imu_compounds(graph_keys, settings):
     }
 
 
+# For the IMU we have a function that creates the nodes for a single IMU in
+# a compound, and another function that creates all the IMU subcompounds
+# and a compound to include them all.
+# Fot the cameras instead, we have some additional connections to do after
+# the creation of the subcompound (since we have two nodes that needs both
+# execIn and context). Hence, the first function creates the nodes AND the
+# subcompound, while the second creates the full compound merging all actions.
+
+
 def create_camera_subcompound(
-    graph_keys, settings, camera_name, camera_target, camera_type
+    graph_keys,
+    topic_prefix,
+    camera_prefix,
+    camera_suffix,
+    camera_target,
+    camera_type,
+    promoted,
 ):
-    render_node_name = "render_" + camera_name + "_" + camera_type
-    publish_node_name = "publish_" + camera_name + "_" + camera_type
-    publish_info_node_name = "publish_info_" + camera_name + "_" + camera_type
-    compound_name = camera_name + "_" + camera_type + "_compound"
-    topic_name = settings.topic_prefix + "/" + camera_name + "/" + camera_type
+    camera_prefix_name = camera_prefix.replace("/", "_")
+    render_node_name = "render_" + camera_prefix_name + "_" + camera_suffix
+    publish_node_name = "publish_" + camera_prefix_name + "_" + camera_suffix
+    publish_info_node_name = "publish_info_" + camera_prefix_name + "_" + camera_suffix
+    compound_name = camera_prefix_name + "_" + camera_suffix + "_compound"
+    topic_name = topic_prefix + "/" + camera_prefix + "/" + camera_suffix
     topic_info_name = topic_name + "/info"
-    return {
+
+    compound_actions = {
         graph_keys.CREATE_NODES: [
             (
-                compound_name,
-                {
-                    graph_keys.CREATE_NODES: [
-                        (
-                            render_node_name,
-                            "isaacsim.core.nodes.IsaacCreateRenderProduct",
-                        ),
-                        (publish_node_name, "isaacsim.ros2.bridge.ROS2CameraHelper"),
-                        (
-                            publish_info_node_name,
-                            "isaacsim.ros2.bridge.ROS2CameraInfoHelper",
-                        ),
-                    ],
-                    graph_keys.SET_VALUES: [
-                        (
-                            render_node_name + ".inputs:cameraPrim",
-                            camera_target,
-                        ),
-                        (
-                            publish_node_name + ".inputs:topicName",
-                            topic_name,
-                        ),
-                        (publish_node_name + ".inputs:type", camera_type),
-                        (
-                            publish_info_node_name + ".inputs:topicName",
-                            topic_info_name,
-                        ),
-                    ],
-                    graph_keys.PROMOTE_ATTRIBUTES: [
-                        (render_node_name + ".inputs:execIn", "inputs:execIn"),
-                        (
-                            publish_node_name + ".inputs:context",
-                            "inputs:context",
-                        ),  # Missing the info context connection, done below
-                    ],
-                    graph_keys.CONNECT: [
-                        (
-                            render_node_name + ".outputs:execOut",
-                            publish_node_name + ".inputs:execIn",
-                        ),
-                        (
-                            render_node_name + ".outputs:execOut",
-                            publish_info_node_name + ".inputs:execIn",
-                        ),
-                        (
-                            render_node_name + ".outputs:renderProductPath",
-                            publish_node_name + ".inputs:renderProductPath",
-                        ),
-                        (
-                            render_node_name + ".outputs:renderProductPath",
-                            publish_info_node_name + ".inputs:renderProductPath",
-                        ),
-                    ],
-                },
-            )
+                render_node_name,
+                "isaacsim.core.nodes.IsaacCreateRenderProduct",
+            ),
+            (publish_node_name, "isaacsim.ros2.bridge.ROS2CameraHelper"),
+            (
+                publish_info_node_name,
+                "isaacsim.ros2.bridge.ROS2CameraInfoHelper",
+            ),
         ],
+        graph_keys.SET_VALUES: [
+            (
+                render_node_name + ".inputs:cameraPrim",
+                camera_target,
+            ),
+            (
+                publish_node_name + ".inputs:topicName",
+                topic_name,
+            ),
+            (publish_node_name + ".inputs:type", camera_type),
+            (
+                publish_info_node_name + ".inputs:topicName",
+                topic_info_name,
+            ),
+        ],
+        graph_keys.PROMOTE_ATTRIBUTES: [
+            (render_node_name + ".inputs:execIn", "inputs:execIn"),
+            (publish_node_name + ".inputs:context", "inputs:context"),
+        ],
+        graph_keys.CONNECT: [
+            (
+                render_node_name + ".outputs:execOut",
+                publish_node_name + ".inputs:execIn",
+            ),
+            (
+                render_node_name + ".outputs:execOut",
+                publish_info_node_name + ".inputs:execIn",
+            ),
+            (
+                render_node_name + ".outputs:renderProductPath",
+                publish_node_name + ".inputs:renderProductPath",
+            ),
+            (
+                render_node_name + ".outputs:renderProductPath",
+                publish_info_node_name + ".inputs:renderProductPath",
+            ),
+        ],
+    }
+
+    output = {
+        graph_keys.CREATE_NODES: [(compound_name, compound_actions)],
+        # Since we can promote only one "context" input, we do the connection
+        # here explicitly
         graph_keys.CONNECT: [
             (
                 compound_name + ".inputs:context",
@@ -310,8 +358,58 @@ def create_camera_subcompound(
         ],
     }
 
+    if promoted:
+        # If the sucompound is promoted, promote the inputs
+        output[graph_keys.PROMOTE_ATTRIBUTES] = [
+            (compound_name + ".inputs:execIn", "inputs:execIn"),
+            (compound_name + ".inputs:context", "inputs:context"),
+        ]
 
-# def create_camera_compounds()
+    return output, compound_name
+
+
+def create_camera_compounds(graph_keys, settings):
+    if len(settings.cameras) == 0:
+        return
+
+    compound_name = "ros2_cameras_compound"
+    subcompound_actions = []
+    promote = True
+    connections = []
+    for camera in settings.cameras:
+        actions, subcompound_name = create_camera_subcompound(
+            graph_keys,
+            settings.topic_prefix,
+            camera.prefix,
+            camera.suffix,
+            camera.target,
+            camera.type,
+            promote,
+        )
+        subcompound_actions.append(actions)
+
+        if not promote:
+            connections.append(
+                (compound_name + ".inputs:execIn", subcompound_name + ".inputs:execIn")
+            )
+            connections.append(
+                (
+                    compound_name + ".inputs:context",
+                    subcompound_name + ".inputs:context",
+                )
+            )
+
+        promote = False  # We promote only the first
+
+    connections.append(("tick.outputs:tick", compound_name + ".inputs:execIn"))
+    connections.append(
+        ("ros2_context.outputs:context", compound_name + ".inputs:context")
+    )
+
+    return {
+        graph_keys.CREATE_NODES: [(compound_name, merge_actions(subcompound_actions))],
+        graph_keys.CONNECT: connections,
+    }
 
 
 keys = og.Controller.Keys
@@ -322,12 +420,13 @@ cmds_dicts = [
     add_ros2_clock_publisher(keys),
     add_ros2_joint_compound(keys, s),
     create_imu_compounds(keys, s),
+    create_camera_compounds(keys, s),
 ]
 cmds = merge_actions(cmds_dicts)
 
 print(cmds)
 
 (graph, nodes, prims, name_to_object_map) = og.Controller.edit(
-    {"graph_path": "/action_graph", "evaluator_name": "execution"},
+    {"graph_path": s.graph_path, "evaluator_name": "execution"},
     cmds,
 )
