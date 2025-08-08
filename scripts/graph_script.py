@@ -1,5 +1,17 @@
-import omni.graph.core as og
+#######################################################################################
+################### EDIT ONLY THE SETTINGS AT THE END OF THE FILE #####################
+#######################################################################################
+
+
 import dataclasses
+
+import omni.graph.core as og
+
+
+@dataclasses.dataclass
+class Imu:
+    name: str
+    target: str
 
 
 @dataclasses.dataclass
@@ -18,81 +30,14 @@ class FT:
     flip: bool
 
 
+@dataclasses.dataclass
 class Settings:
-    def __init__(self):
-        self.graph_path = "/World/ergoCubSN002/ros2_action_graph"
-        self.robot_path = "/World/ergoCubSN002/robot"
-        self.articulation_root = self.robot_path + "/root_link"
-        self.topic_prefix = "/ergocub"
-        self.imus = {
-            "waist_imu_0": self.robot_path + "/torso_1/waist_imu_0_sensor",
-            "head_imu_0": self.robot_path + "/head/head_imu_0_sensor",
-        }
-        realsense_prefix = self.robot_path + "/realsense/sensors/RSD455"
-        self.cameras = [
-            Camera(
-                prefix="realsense",
-                suffix="rgb",
-                type="rgb",
-                target=realsense_prefix + "/Camera_OmniVision_OV9782_Color",
-            ),
-            Camera(
-                prefix="realsense",
-                suffix="depth",
-                type="depth",
-                target=realsense_prefix + "/Camera_Pseudo_Depth",
-            ),
-        ]
-        self.FTs = [
-            FT(
-                name="l_leg_ft",
-                joint=self.robot_path + "/joints/l_leg_ft_sensor",
-                frame=self.robot_path + "/l_hip_2/l_leg_ft",
-                flip=False,
-            ),
-            FT(
-                name="l_foot_front_ft",
-                joint=self.robot_path + "/joints/l_foot_front_ft_sensor",
-                frame=self.robot_path + "/l_ankle_2/l_foot_front_ft",
-                flip=False,
-            ),
-            FT(
-                name="l_foot_rear_ft",
-                joint=self.robot_path + "/joints/l_foot_rear_ft_sensor",
-                frame=self.robot_path + "/l_ankle_2/l_foot_rear_ft",
-                flip=False,
-            ),
-            FT(
-                name="r_leg_ft",
-                joint=self.robot_path + "/joints/r_leg_ft_sensor",
-                frame=self.robot_path + "/r_hip_2/r_leg_ft",
-                flip=False,
-            ),
-            FT(
-                name="r_foot_front_ft",
-                joint=self.robot_path + "/joints/r_foot_front_ft_sensor",
-                frame=self.robot_path + "/r_ankle_2/r_foot_front_ft",
-                flip=False,
-            ),
-            FT(
-                name="r_foot_rear_ft",
-                joint=self.robot_path + "/joints/r_foot_rear_ft_sensor",
-                frame=self.robot_path + "/r_ankle_2/r_foot_rear_ft",
-                flip=False,
-            ),
-            FT(
-                name="l_arm_ft",
-                joint=self.robot_path + "/joints/l_arm_ft_sensor",
-                frame=self.robot_path + "/l_shoulder_2/l_arm_ft",
-                flip=False,
-            ),
-            FT(
-                name="r_arm_ft",
-                joint=self.robot_path + "/joints/r_arm_ft_sensor",
-                frame=self.robot_path + "/r_shoulder_2/r_arm_ft",
-                flip=False,
-            ),
-        ]
+    graph_path: str
+    articulation_root: str
+    topic_prefix: str
+    imus: list[Imu]
+    cameras: list[Camera]
+    FTs: list[FT]
 
 
 def merge_actions(action_list):
@@ -143,10 +88,11 @@ def add_ros2_clock_publisher(graph_keys):
 
 
 def add_ros2_joint_compound(graph_keys, settings):
+    compound_name = "ros2_joint_compound"
     return {
         graph_keys.CREATE_NODES: [
             (
-                "ros2_joint_compound",
+                compound_name,
                 {
                     graph_keys.CREATE_NODES: [
                         (
@@ -207,47 +153,44 @@ def add_ros2_joint_compound(graph_keys, settings):
             )
         ],
         graph_keys.CONNECT: [
-            ("tick.outputs:tick", "ros2_joint_compound.inputs:execIn"),
+            ("tick.outputs:tick", compound_name + ".inputs:execIn"),
             (
                 "ros2_context.outputs:context",
-                "ros2_joint_compound.inputs:context",
+                compound_name + ".inputs:context",
             ),
             (
                 "sim_time.outputs:simulationTime",
-                "ros2_joint_compound.inputs:timeStamp",
+                compound_name + ".inputs:timeStamp",
             ),
             (
-                "ros2_joint_compound.inputs:execIn",
+                compound_name + ".inputs:execIn",
                 "ros2_joint_subscriber.inputs:execIn",
             ),
             (
-                "ros2_joint_compound.inputs:context",
+                compound_name + ".inputs:context",
                 "ros2_joint_subscriber.inputs:context",
             ),
             (
-                "ros2_joint_compound.inputs:execIn",
+                compound_name + ".inputs:execIn",
                 "articulation_controller.inputs:execIn",
             ),
         ],
     }
 
 
-def create_imu_subcompound(graph_keys, settings, imu_name, imu_target):
-    read_node_name = "read_" + imu_name
-    publish_node_name = "publish_" + imu_name
+def create_imu_subcompound(graph_keys, settings, name, target):
+    read_node_name = "read_" + name
+    publish_node_name = "publish_" + name
     return {
         graph_keys.CREATE_NODES: [
             (read_node_name, "isaacsim.sensors.physics.IsaacReadIMU"),
             (publish_node_name, "isaacsim.ros2.bridge.ROS2PublishImu"),
         ],
         graph_keys.SET_VALUES: [
-            (
-                read_node_name + ".inputs:imuPrim",
-                imu_target,
-            ),
+            (read_node_name + ".inputs:imuPrim", target),
             (
                 publish_node_name + ".inputs:topicName",
-                settings.topic_prefix + "/IMU/" + imu_name,
+                settings.topic_prefix + "/IMU/" + name,
             ),
         ],
         graph_keys.PROMOTE_ATTRIBUTES: [
@@ -283,36 +226,43 @@ def create_imu_compounds(graph_keys, settings):
     if len(settings.imus) == 0:
         return
 
+    compound_name = "ros2_imus_compound"
     imu_compounds = []
     first_compound = None
     connections = []
-    for key, value in settings.imus.items():
-        compound_name = key + "_compound"
+    for imu in settings.imus:
+        subcompound_name = imu.name + "_compound"
         imu_compounds.append(
-            (compound_name, create_imu_subcompound(graph_keys, settings, key, value))
+            (
+                subcompound_name,
+                create_imu_subcompound(graph_keys, settings, imu.name, imu.target),
+            )
         )
         if not first_compound:
             # Only the first compound gets the attributes promoted
-            first_compound = compound_name
+            first_compound = subcompound_name
         else:
             # Add the connections to the inner compound inputs for the internal inputs
             # that have not been promoted
             connections.append(
-                ("ros2_imus_compound.inputs:execIn", compound_name + ".inputs:execIn")
+                (compound_name + ".inputs:execIn", subcompound_name + ".inputs:execIn")
             )
             connections.append(
-                ("ros2_imus_compound.inputs:context", compound_name + ".inputs:context")
+                (
+                    compound_name + ".inputs:context",
+                    subcompound_name + ".inputs:context",
+                )
             )
 
-    connections.append(("tick.outputs:tick", "ros2_imus_compound.inputs:execIn"))
+    connections.append(("tick.outputs:tick", compound_name + ".inputs:execIn"))
     connections.append(
-        ("ros2_context.outputs:context", "ros2_imus_compound.inputs:context")
+        ("ros2_context.outputs:context", compound_name + ".inputs:context")
     )
 
     return {
         graph_keys.CREATE_NODES: [
             (
-                "ros2_imus_compound",
+                compound_name,
                 {
                     graph_keys.CREATE_NODES: imu_compounds,
                     graph_keys.PROMOTE_ATTRIBUTES: [
@@ -743,7 +693,7 @@ def compute(db: og.Database) -> bool:
     }
 
 
-def create_ft_compound(graph_keys, settings):
+def create_ft_compounds(graph_keys, settings):
     if len(settings.FTs) == 0:
         return
 
@@ -805,20 +755,109 @@ def create_ft_compound(graph_keys, settings):
     }
 
 
-keys = og.Controller.Keys
-s = Settings()
-cmds = {}
-cmds_dicts = [
-    add_basic_nodes(keys),
-    add_ros2_clock_publisher(keys),
-    add_ros2_joint_compound(keys, s),
-    create_imu_compounds(keys, s),
-    create_camera_compounds(keys, s),
-    create_ft_compound(keys, s),
-]
-cmds = merge_actions(cmds_dicts)
+def create_graph(actions_list):
+    (graph, nodes, prims, name_to_object_map) = og.Controller.edit(
+        {"graph_path": s.graph_path, "evaluator_name": "execution"},
+        merge_actions(actions_list),
+    )
+    if graph.is_valid():
+        print("Graph created successfully!")
+    else:
+        print("FAILED TO CREATE GRAPH!")
 
-(graph, nodes, prims, name_to_object_map) = og.Controller.edit(
-    {"graph_path": s.graph_path, "evaluator_name": "execution"},
-    cmds,
+
+#######################################################################################
+########################## EDIT ONLY THE SETTINGS HERE BELOW ##########################
+#######################################################################################
+
+robot_path = "/World/ergoCubSN002/robot"
+realsense_prefix = robot_path + "/realsense/sensors/RSD455"
+s = Settings(
+    graph_path="/World/ergoCubSN002/ros2_action_graph",
+    articulation_root=robot_path + "/root_link",
+    topic_prefix="/ergocub",
+    imus=[
+        Imu(name="waist_imu_0", target=robot_path + "/torso_1/waist_imu_0_sensor"),
+        Imu(name="head_imu_0", target=robot_path + "/head/head_imu_0_sensor"),
+    ],
+    cameras=[
+        Camera(
+            prefix="realsense",
+            suffix="rgb",
+            type="rgb",
+            target=realsense_prefix + "/Camera_OmniVision_OV9782_Color",
+        ),
+        Camera(
+            prefix="realsense",
+            suffix="depth",
+            type="depth",
+            target=realsense_prefix + "/Camera_Pseudo_Depth",
+        ),
+    ],
+    FTs=[
+        FT(
+            name="l_leg_ft",
+            joint=robot_path + "/joints/l_leg_ft_sensor",
+            frame=robot_path + "/l_hip_2/l_leg_ft",
+            flip=False,
+        ),
+        FT(
+            name="l_foot_front_ft",
+            joint=robot_path + "/joints/l_foot_front_ft_sensor",
+            frame=robot_path + "/l_ankle_2/l_foot_front_ft",
+            flip=False,
+        ),
+        FT(
+            name="l_foot_rear_ft",
+            joint=robot_path + "/joints/l_foot_rear_ft_sensor",
+            frame=robot_path + "/l_ankle_2/l_foot_rear_ft",
+            flip=False,
+        ),
+        FT(
+            name="r_leg_ft",
+            joint=robot_path + "/joints/r_leg_ft_sensor",
+            frame=robot_path + "/r_hip_2/r_leg_ft",
+            flip=False,
+        ),
+        FT(
+            name="r_foot_front_ft",
+            joint=robot_path + "/joints/r_foot_front_ft_sensor",
+            frame=robot_path + "/r_ankle_2/r_foot_front_ft",
+            flip=False,
+        ),
+        FT(
+            name="r_foot_rear_ft",
+            joint=robot_path + "/joints/r_foot_rear_ft_sensor",
+            frame=robot_path + "/r_ankle_2/r_foot_rear_ft",
+            flip=False,
+        ),
+        FT(
+            name="l_arm_ft",
+            joint=robot_path + "/joints/l_arm_ft_sensor",
+            frame=robot_path + "/l_shoulder_2/l_arm_ft",
+            flip=False,
+        ),
+        FT(
+            name="r_arm_ft",
+            joint=robot_path + "/joints/r_arm_ft_sensor",
+            frame=robot_path + "/r_shoulder_2/r_arm_ft",
+            flip=False,
+        ),
+    ],
+)
+
+#######################################################################################
+#######################################################################################
+#######################################################################################
+
+keys = og.Controller.Keys
+create_graph(
+    [
+        add_basic_nodes(keys),
+        add_ros2_clock_publisher(keys),
+        add_ros2_joint_compound(keys, s),
+        create_imu_compounds(keys, s),
+        create_camera_compounds(keys, s),
+        create_ft_compounds(keys, s),
+    ]
 )
