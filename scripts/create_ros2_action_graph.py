@@ -1,3 +1,9 @@
+"""
+This script generates a OmniGraph action graph publishing joint states, IMUs, FTs,
+and camera readings on ROS2. The settings for creating the graph are at the end of the
+file.
+"""
+
 #######################################################################################
 ################### EDIT ONLY THE SETTINGS AT THE END OF THE FILE #####################
 #######################################################################################

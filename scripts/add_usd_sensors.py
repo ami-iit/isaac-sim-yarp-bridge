@@ -1,3 +1,7 @@
+"""
+This script adds the realsense and the IMUs on a freshly imported ergoCub USD.
+"""
+
 import isaacsim.core.utils.physics as physics_utils
 import isaacsim.core.utils.prims as prims_utils
 import isaacsim.core.utils.rotations as rotations_utils
