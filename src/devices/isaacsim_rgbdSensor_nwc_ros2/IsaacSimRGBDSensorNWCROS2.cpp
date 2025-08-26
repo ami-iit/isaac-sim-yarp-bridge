@@ -10,6 +10,10 @@
 YARP_DECLARE_LOG_COMPONENT(RGBD)
 YARP_LOG_COMPONENT(RGBD, "yarp.device.IsaacSimRGBDSensorNWCROS2")
 
+yarp::dev::IsaacSimRGBDSensorNWCROS2::~IsaacSimRGBDSensorNWCROS2()
+{
+    close();
+}
 
 bool yarp::dev::IsaacSimRGBDSensorNWCROS2::open(yarp::os::Searchable& config)
 {
@@ -19,10 +23,13 @@ bool yarp::dev::IsaacSimRGBDSensorNWCROS2::open(yarp::os::Searchable& config)
         m_errorHandler << "Failed to parse parameters for IsaacSimRGBDSensorNWCROS2";
         return false;
     }
-
-    rclcpp::init(0, nullptr);
+    if (!rclcpp::ok())
+    {
+        rclcpp::init(0, nullptr);
+    }
     m_subscriber = std::make_shared<RGBDSubscriber>(m_paramsParser.m_node_name, m_paramsParser.m_rgb_topic_name, m_paramsParser.m_depth_topic_name, this);
-    rclcpp::spin(m_subscriber);
+    m_executor.add_node(m_subscriber);
+    m_executorThread = std::thread([this]() { m_executor.spin(); });
 
     return true;
 }
@@ -36,9 +43,14 @@ bool yarp::dev::IsaacSimRGBDSensorNWCROS2::close()
     m_depthInfoReceivedOnce = false;
     if (m_subscriber)
     {
+        m_executor.cancel();
+        m_executorThread.join();
         m_subscriber.reset();
     }
-    rclcpp::shutdown();
+    if (rclcpp::ok())
+    {
+        rclcpp::shutdown();
+    }
     return true;
 }
 

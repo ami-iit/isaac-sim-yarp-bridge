@@ -10,6 +10,7 @@
 #include <yarp/sig/IntrinsicParams.h>
 
 #include <rclcpp/node.hpp>
+#include <rclcpp/executors/single_threaded_executor.hpp>
 #include <sensor_msgs/msg/image.hpp>
 #include <sensor_msgs/msg/camera_info.hpp>
 
@@ -17,6 +18,7 @@
 #include <mutex>
 #include <atomic>
 #include <sstream>
+#include <thread>
 
 #include "IsaacSimRGBDSensorNWCROS2_ParamsParser.h"
 
@@ -33,7 +35,7 @@ class yarp::dev::IsaacSimRGBDSensorNWCROS2 :
 
 public:
     IsaacSimRGBDSensorNWCROS2() = default;
-    ~IsaacSimRGBDSensorNWCROS2() override = default;
+    ~IsaacSimRGBDSensorNWCROS2() override;
 
     // DeviceDriver
     bool open(yarp::os::Searchable& config) override;
@@ -119,6 +121,8 @@ private:
 
     IsaacSimRGBDSensorNWCROS2_ParamsParser m_paramsParser;
     std::shared_ptr<RGBDSubscriber> m_subscriber;
+    rclcpp::executors::SingleThreadedExecutor m_executor;
+    std::thread m_executorThread;
     std::atomic<bool> m_rgbReceivedOnce{ false };
     std::atomic<bool> m_depthReceivedOnce{ false };
     std::atomic<bool> m_rgbInfoReceivedOnce{ false };
