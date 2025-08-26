@@ -22,8 +22,10 @@ using namespace std::chrono_literals;
 class TestNode : public rclcpp::Node {
 public:
     TestNode() : Node("test_node") {
-        rgb_pub_ = this->create_publisher<sensor_msgs::msg::Image>("/camera/rgb/image_raw", 10);
-        depth_pub_ = this->create_publisher<sensor_msgs::msg::Image>("/camera/depth/image_raw", 10);
+        m_rgb_pub = this->create_publisher<sensor_msgs::msg::Image>("/camera/rgb/image_raw", 10);
+        m_depth_pub = this->create_publisher<sensor_msgs::msg::Image>("/camera/depth/image_raw", 10);
+        m_rgb_info_pub = this->create_publisher<sensor_msgs::msg::CameraInfo>("/camera/rgb/image_raw/info", 10);
+        m_depth_info_pub = this->create_publisher<sensor_msgs::msg::CameraInfo>("/camera/depth/image_raw/info", 10);
     }
 
     void publish_dummy_images() {
@@ -49,13 +51,32 @@ public:
         depth_msg.header.stamp = now();
         depth_msg.header.frame_id = "depth_frame";
 
-        rgb_pub_->publish(rgb_msg);
-        depth_pub_->publish(depth_msg);
+        m_rgb_pub->publish(rgb_msg);
+        m_depth_pub->publish(depth_msg);
+    }
+
+    void publish_dummy_camera_info() {
+        auto rgb_info_msg = sensor_msgs::msg::CameraInfo();
+        rgb_info_msg.height = 2;
+        rgb_info_msg.width = 2;
+        rgb_info_msg.k = { 100.0, 0.0, 1.0, 0.0, 100.0, 1.0, 0.0, 0.0, 1.0 };
+        rgb_info_msg.header.stamp = now();
+        rgb_info_msg.header.frame_id = "rgb_frame";
+        m_rgb_info_pub->publish(rgb_info_msg);
+        auto depth_info_msg = sensor_msgs::msg::CameraInfo();
+        depth_info_msg.height = 2;
+        depth_info_msg.width = 2;
+        depth_info_msg.k = { 100.0, 0.0, 1.0, 0.0, 100.0, 1.0, 0.0, 0.0, 1.0 };
+        depth_info_msg.header.stamp = now();
+        depth_info_msg.header.frame_id = "depth_frame";
+        m_depth_info_pub->publish(depth_info_msg);
     }
 
 private:
-    rclcpp::Publisher<sensor_msgs::msg::Image>::SharedPtr rgb_pub_;
-    rclcpp::Publisher<sensor_msgs::msg::Image>::SharedPtr depth_pub_;
+    rclcpp::Publisher<sensor_msgs::msg::Image>::SharedPtr m_rgb_pub;
+    rclcpp::Publisher<sensor_msgs::msg::Image>::SharedPtr m_depth_pub;
+    rclcpp::Publisher<sensor_msgs::msg::CameraInfo>::SharedPtr m_rgb_info_pub;
+    rclcpp::Publisher<sensor_msgs::msg::CameraInfo>::SharedPtr m_depth_info_pub;
 };
 
 TEST_CASE("RGB and Depth image reception", "[ros2]") {
@@ -118,6 +139,45 @@ TEST_CASE("RGB and Depth image reception", "[ros2]") {
     std::memcpy(&received_depth, depth_image.getRawImage(), sizeof(float));
     REQUIRE_THAT(received_depth,
         Catch::Matchers::WithinULP(1.23f, 0));
+
+
+    node->publish_dummy_camera_info();
+
+    start = std::chrono::steady_clock::now();
+    received = false;
+
+    yarp::os::Property rgb_intrinsic;
+    yarp::os::Property depth_intrinsic;
+
+    while (std::chrono::steady_clock::now() - start < 2s) {
+        executor.spin_some();
+        if (device.getRgbIntrinsicParam(rgb_intrinsic)
+            && device.getDepthIntrinsicParam(depth_intrinsic)) {
+            received = true;
+            break;
+        }
+        std::this_thread::sleep_for(50ms);
+    }
+
+    REQUIRE(received);
+    REQUIRE_THAT(rgb_intrinsic.find("focalLengthX").asFloat64(),
+        Catch::Matchers::WithinULP(100.0, 0));
+    REQUIRE_THAT(rgb_intrinsic.find("focalLengthY").asFloat64(),
+        Catch::Matchers::WithinULP(100.0, 0));
+    REQUIRE_THAT(rgb_intrinsic.find("principalPointX").asFloat64(),
+        Catch::Matchers::WithinULP(1.0, 0));
+    REQUIRE_THAT(rgb_intrinsic.find("principalPointY").asFloat64(),
+        Catch::Matchers::WithinULP(1.0, 0));
+
+    REQUIRE_THAT(depth_intrinsic.find("focalLengthX").asFloat64(),
+        Catch::Matchers::WithinULP(100.0, 0));
+    REQUIRE_THAT(depth_intrinsic.find("focalLengthY").asFloat64(),
+        Catch::Matchers::WithinULP(100.0, 0));
+    REQUIRE_THAT(depth_intrinsic.find("principalPointX").asFloat64(),
+        Catch::Matchers::WithinULP(1.0, 0));
+    REQUIRE_THAT(depth_intrinsic.find("principalPointY").asFloat64(),
+        Catch::Matchers::WithinULP(1.0, 0));
+
     REQUIRE(device.close());
     rclcpp::shutdown();
 }
