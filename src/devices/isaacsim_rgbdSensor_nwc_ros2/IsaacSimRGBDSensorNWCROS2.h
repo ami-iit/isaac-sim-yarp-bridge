@@ -5,7 +5,6 @@
 #define ISAACSIM_RGBD_SENSOR_NWC_ROS2_H
 
 #include <yarp/dev/DeviceDriver.h>
-#include <yarp/os/PeriodicThread.h>
 #include <yarp/dev/IRGBDSensor.h>
 #include <yarp/sig/IntrinsicParams.h>
 
