@@ -9,15 +9,16 @@
 
 
 #include <rclcpp/node.hpp>
-#include <rclcpp/executors/single_threaded_executor.hpp>
-#include <sensor_msgs/msg/image.hpp>
-#include <sensor_msgs/msg/camera_info.hpp>
+#include <rclcpp/executors/multi_threaded_executor.hpp>
+#include <sensor_msgs/msg/imu.hpp>
+#include <geometry_msgs/msg/wrench_stamped.hpp>
 
 #include <memory>
 #include <mutex>
 #include <atomic>
 #include <sstream>
 #include <thread>
+#include <vector>
 
 #include "IsaacSimMultipleAnalogSensorsNWCROS2_ParamsParser.h"
 
@@ -137,6 +138,47 @@ public:
     bool getLinearVelocitySensorMeasure(size_t sens_index, yarp::sig::Vector& xyz, double& timestamp) const override;
 
 private:
+    struct IMUMeasure
+    {
+        std::string frame;
+        yarp::sig::Vector rpy_deg;
+        yarp::sig::Vector angular_velocity_deg_s;
+        yarp::sig::Vector linear_acceleration_m_s2;
+        double timestamp;
+        std::atomic<bool> valid{ false };
+        std::mutex mutex;
+        void convert_to_yarp_vectors(const sensor_msgs::msg::Imu::ConstSharedPtr& imu);
+    };
+
+    struct FTMeasure
+    {
+        std::string frame;
+        yarp::sig::Vector force_torque;
+        double timestamp;
+        std::atomic<bool> valid{ false };
+        std::mutex mutex;
+        void convert_to_yarp_vectors(const geometry_msgs::msg::WrenchStamped::ConstSharedPtr& ft);
+    };
+
+    class MASSubscriber : public rclcpp::Node
+    {
+    public:
+        MASSubscriber(const std::string& name,
+                     const std::vector<std::string>& imuTopics,
+                     const std::vector<std::string>& ftTopics,
+                     IsaacSimMultipleAnalogSensorsNWCROS2* parent);
+    private:
+        std::vector<rclcpp::Subscription<sensor_msgs::msg::Imu>::SharedPtr> m_imu_subs;
+        std::vector<rclcpp::Subscription<geometry_msgs::msg::WrenchStamped>::SharedPtr> m_ft_subs;
+    };
+
+    IsaacSimMultipleAnalogSensorsNWCROS2_ParamsParser m_paramsParser;
+    std::shared_ptr<MASSubscriber> m_subscriber;
+    rclcpp::executors::MultiThreadedExecutor m_executor;
+    std::thread m_executorThread;
+    std::vector<IMUMeasure> m_imus;
+    std::vector<FTMeasure> m_fts;
+    std::mutex m_mutex;
 
 };
 #endif

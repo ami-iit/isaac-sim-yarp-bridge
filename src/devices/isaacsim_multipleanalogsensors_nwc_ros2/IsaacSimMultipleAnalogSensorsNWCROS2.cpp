@@ -325,3 +325,19 @@ bool yarp::dev::IsaacSimMultipleAnalogSensorsNWCROS2::getLinearVelocitySensorMea
 {
     return false;
 }
+
+void yarp::dev::IsaacSimMultipleAnalogSensorsNWCROS2::IMUMeasure::convert_to_yarp_vectors(const sensor_msgs::msg::Imu::ConstSharedPtr& imu)
+{
+    // Convert the rotation from quaternion to roll-pitch-yaw (in degrees)
+    // Convert the angular velocity from rad/s to deg/s
+}
+
+void yarp::dev::IsaacSimMultipleAnalogSensorsNWCROS2::FTMeasure::convert_to_yarp_vectors(const geometry_msgs::msg::WrenchStamped::ConstSharedPtr& ft)
+{
+}
+
+yarp::dev::IsaacSimMultipleAnalogSensorsNWCROS2::MASSubscriber::MASSubscriber(const std::string& name, const std::vector<std::string>& imuTopics, const std::vector<std::string>& ftTopics, IsaacSimMultipleAnalogSensorsNWCROS2* parent)
+    : Node(name)
+{
+
+}

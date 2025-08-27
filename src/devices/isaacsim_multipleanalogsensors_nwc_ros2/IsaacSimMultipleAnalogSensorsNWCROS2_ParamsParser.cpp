@@ -8,7 +8,7 @@
 // This is an automatically generated file. Please do not edit it.
 // It will be re-generated if the cmake flag ALLOW_DEVICE_PARAM_PARSER_GERNERATION is ON.
 
-// Generated on: Tue Aug 26 19:08:23 2025
+// Generated on: Wed Aug 27 10:59:27 2025
 
 
 #include "IsaacSimMultipleAnalogSensorsNWCROS2_ParamsParser.h"
@@ -30,9 +30,7 @@ std::vector<std::string> IsaacSimMultipleAnalogSensorsNWCROS2_ParamsParser::getL
     std::vector<std::string> params;
     params.push_back("node_name");
     params.push_back("ft_topic_names");
-    params.push_back("ft_frame_names");
     params.push_back("imu_topic_names");
-    params.push_back("imu_frame_names");
     return params;
 }
 
@@ -48,15 +46,7 @@ bool IsaacSimMultipleAnalogSensorsNWCROS2_ParamsParser::getParamValue(const std:
     {
         return false;
     }
-    if (paramName =="ft_frame_names")
-    {
-        return false;
-    }
     if (paramName =="imu_topic_names")
-    {
-        return false;
-    }
-    if (paramName =="imu_frame_names")
     {
         return false;
     }
@@ -132,37 +122,6 @@ bool      IsaacSimMultipleAnalogSensorsNWCROS2_ParamsParser::parseParams(const y
         prop_check.unput("ft_topic_names");
     }
 
-    //Parser of parameter ft_frame_names
-    {
-        if (config.check("ft_frame_names"))
-        {
-            {
-                m_ft_frame_names.clear();
-                yarp::os::Bottle* tempBot = config.find("ft_frame_names").asList();
-                if (tempBot)
-                {
-                    std::string tempBots = tempBot->toString();
-                    for (size_t i=0; i<tempBot->size(); i++)
-                    {
-                        m_ft_frame_names.push_back(tempBot->get(i).asString());
-                    }
-                }
-                else
-                {
-                     yCError(IsaacSimMultipleAnalogSensorsNWCROS2ParamsCOMPONENT) <<"parameter 'ft_frame_names' is not a properly formatted bottle";
-                }
-            }
-            yCInfo(IsaacSimMultipleAnalogSensorsNWCROS2ParamsCOMPONENT) << "Parameter 'ft_frame_names' using value:" << m_ft_frame_names;
-        }
-        else
-        {
-            yCError(IsaacSimMultipleAnalogSensorsNWCROS2ParamsCOMPONENT) << "Mandatory parameter 'ft_frame_names' not found!";
-            yCError(IsaacSimMultipleAnalogSensorsNWCROS2ParamsCOMPONENT) << "Description of the parameter: Specify the name of the FT frames";
-            return false;
-        }
-        prop_check.unput("ft_frame_names");
-    }
-
     //Parser of parameter imu_topic_names
     {
         if (config.check("imu_topic_names"))
@@ -192,37 +151,6 @@ bool      IsaacSimMultipleAnalogSensorsNWCROS2_ParamsParser::parseParams(const y
             return false;
         }
         prop_check.unput("imu_topic_names");
-    }
-
-    //Parser of parameter imu_frame_names
-    {
-        if (config.check("imu_frame_names"))
-        {
-            {
-                m_imu_frame_names.clear();
-                yarp::os::Bottle* tempBot = config.find("imu_frame_names").asList();
-                if (tempBot)
-                {
-                    std::string tempBots = tempBot->toString();
-                    for (size_t i=0; i<tempBot->size(); i++)
-                    {
-                        m_imu_frame_names.push_back(tempBot->get(i).asString());
-                    }
-                }
-                else
-                {
-                     yCError(IsaacSimMultipleAnalogSensorsNWCROS2ParamsCOMPONENT) <<"parameter 'imu_frame_names' is not a properly formatted bottle";
-                }
-            }
-            yCInfo(IsaacSimMultipleAnalogSensorsNWCROS2ParamsCOMPONENT) << "Parameter 'imu_frame_names' using value:" << m_imu_frame_names;
-        }
-        else
-        {
-            yCError(IsaacSimMultipleAnalogSensorsNWCROS2ParamsCOMPONENT) << "Mandatory parameter 'imu_frame_names' not found!";
-            yCError(IsaacSimMultipleAnalogSensorsNWCROS2ParamsCOMPONENT) << "Description of the parameter: Specify the name of the IMU frames";
-            return false;
-        }
-        prop_check.unput("imu_frame_names");
     }
 
     /*
@@ -263,13 +191,11 @@ std::string      IsaacSimMultipleAnalogSensorsNWCROS2_ParamsParser::getDocumenta
     doc = doc + std::string("This is the list of the parameters accepted by the device:\n");
     doc = doc + std::string("'node_name': Set the name for ROS node\n");
     doc = doc + std::string("'ft_topic_names': Specify the name of the FT topics to connect\n");
-    doc = doc + std::string("'ft_frame_names': Specify the name of the FT frames\n");
     doc = doc + std::string("'imu_topic_names': Specify the name of the IMU topics to connect\n");
-    doc = doc + std::string("'imu_frame_names': Specify the name of the IMU frames\n");
     doc = doc + std::string("\n");
     doc = doc + std::string("Here are some examples of invocation command with yarpdev, with all params:\n");
-    doc = doc + " yarpdev --device IsaacSimMultipleAnalogSensorsNWCROS2 --node_name MASBridgeSubscriber --ft_topic_names <mandatory_value> --ft_frame_names <mandatory_value> --imu_topic_names <mandatory_value> --imu_frame_names <mandatory_value>\n";
+    doc = doc + " yarpdev --device IsaacSimMultipleAnalogSensorsNWCROS2 --node_name MASBridgeSubscriber --ft_topic_names <mandatory_value> --imu_topic_names <mandatory_value>\n";
     doc = doc + std::string("Using only mandatory params:\n");
-    doc = doc + " yarpdev --device IsaacSimMultipleAnalogSensorsNWCROS2 --ft_topic_names <mandatory_value> --ft_frame_names <mandatory_value> --imu_topic_names <mandatory_value> --imu_frame_names <mandatory_value>\n";
+    doc = doc + " yarpdev --device IsaacSimMultipleAnalogSensorsNWCROS2 --ft_topic_names <mandatory_value> --imu_topic_names <mandatory_value>\n";
     doc = doc + std::string("=============================================\n\n");    return doc;
 }
