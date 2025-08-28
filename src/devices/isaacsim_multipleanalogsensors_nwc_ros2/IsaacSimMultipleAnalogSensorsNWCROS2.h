@@ -181,7 +181,7 @@ private:
 
     IsaacSimMultipleAnalogSensorsNWCROS2_ParamsParser m_paramsParser;
     std::shared_ptr<MASSubscriber> m_subscriber;
-    rclcpp::executors::MultiThreadedExecutor m_executor;
+    std::unique_ptr<rclcpp::executors::MultiThreadedExecutor> m_executor;
     std::thread m_executorThread;
     std::vector<IMUMeasure> m_imus;
     std::vector<FTMeasure> m_fts;

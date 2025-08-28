@@ -33,8 +33,9 @@ bool yarp::dev::IsaacSimMultipleAnalogSensorsNWCROS2::open(yarp::os::Searchable&
                                                    m_paramsParser.m_imu_topic_names,
                                                    m_paramsParser.m_ft_topic_names,
                                                    this);
-    m_executor.add_node(m_subscriber);
-    m_executorThread = std::thread([this]() { m_executor.spin(); });
+    m_executor = std::make_unique<rclcpp::executors::MultiThreadedExecutor>();
+    m_executor->add_node(m_subscriber);
+    m_executorThread = std::thread([this]() { m_executor->spin(); });
 
     return true;
 }
@@ -44,7 +45,7 @@ bool yarp::dev::IsaacSimMultipleAnalogSensorsNWCROS2::close()
     std::lock_guard<std::mutex> lock(m_mutex);
     if (m_subscriber)
     {
-        m_executor.cancel();
+        m_executor->cancel();
         m_executorThread.join();
         m_subscriber.reset();
     }

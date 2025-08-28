@@ -120,7 +120,7 @@ private:
 
     IsaacSimRGBDSensorNWCROS2_ParamsParser m_paramsParser;
     std::shared_ptr<RGBDSubscriber> m_subscriber;
-    rclcpp::executors::SingleThreadedExecutor m_executor;
+    std::unique_ptr<rclcpp::executors::SingleThreadedExecutor> m_executor;
     std::thread m_executorThread;
     std::atomic<bool> m_rgbReceivedOnce{ false };
     std::atomic<bool> m_depthReceivedOnce{ false };
