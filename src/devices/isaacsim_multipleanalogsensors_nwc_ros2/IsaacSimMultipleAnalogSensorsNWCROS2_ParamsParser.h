@@ -8,7 +8,7 @@
 // This is an automatically generated file. Please do not edit it.
 // It will be re-generated if the cmake flag ALLOW_DEVICE_PARAM_PARSER_GERNERATION is ON.
 
-// Generated on: Wed Aug 27 10:59:27 2025
+// Generated on: Thu Aug 28 14:20:51 2025
 
 
 #ifndef ISAACSIMMULTIPLEANALOGSENSORSNWCROS2_PARAMSPARSER_H
@@ -23,11 +23,11 @@
 * This class is the parameters parser for class IsaacSimMultipleAnalogSensorsNWCROS2.
 *
 * These are the used parameters:
-* | Group name | Parameter name  | Type           | Units | Default Value       | Required | Description                                   | Notes                             |
-* |:----------:|:---------------:|:--------------:|:-----:|:-------------------:|:--------:|:---------------------------------------------:|:---------------------------------:|
-* | -          | node_name       | string         | -     | MASBridgeSubscriber | 0        | Set the name for ROS node                     | must not start with a leading '/' |
-* | -          | ft_topic_names  | vector<string> | -     | -                   | 1        | Specify the name of the FT topics to connect  | must start with a leading '/'     |
-* | -          | imu_topic_names | vector<string> | -     | -                   | 1        | Specify the name of the IMU topics to connect | must start with a leading '/'     |
+* | Group name | Parameter name  | Type           | Units | Default Value       | Required | Description                                   | Notes                                      |
+* |:----------:|:---------------:|:--------------:|:-----:|:-------------------:|:--------:|:---------------------------------------------:|:------------------------------------------:|
+* | -          | node_name       | string         | -     | MASBridgeSubscriber | 0        | Set the name for ROS node                     | must not start with a leading '/'          |
+* | -          | ft_topic_names  | vector<string> | -     | -                   | 1        | Specify the name of the FT topics to connect  | Each element must start with a leading '/' |
+* | -          | imu_topic_names | vector<string> | -     | -                   | 1        | Specify the name of the IMU topics to connect | Each element must start with a leading '/' |
 *
 * The device can be launched by yarpdev using one of the following examples (with and without all optional parameters):
 * \code{.unparsed}
