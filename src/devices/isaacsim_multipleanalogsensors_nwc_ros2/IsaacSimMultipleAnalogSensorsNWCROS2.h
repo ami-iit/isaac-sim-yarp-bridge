@@ -7,7 +7,6 @@
 #include <yarp/dev/DeviceDriver.h>
 #include <yarp/dev/MultipleAnalogSensorsInterfaces.h>
 
-
 #include <rclcpp/node.hpp>
 #include <rclcpp/executors/multi_threaded_executor.hpp>
 #include <sensor_msgs/msg/imu.hpp>
@@ -16,7 +15,7 @@
 #include <memory>
 #include <mutex>
 #include <atomic>
-#include <sstream>
+#include <string>
 #include <thread>
 #include <vector>
 
