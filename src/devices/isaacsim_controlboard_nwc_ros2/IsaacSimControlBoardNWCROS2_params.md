@@ -1,0 +1,5 @@
+| Group |  Parameter                    | Type   | Units    | Default Value                | Required  | Description                                       | Notes                                      |
+|:-----:|:-----------------------------:|:------:|:--------:|:----------------------------:|:---------:|:-------------------------------------------------:|:------------------------------------------:|
+|       | node_name                     | string | -        | ControlBoardBridgeSubscriber | No        | Set the name for ROS node                         | must not start with a leading '/'          |
+|       | joint_state_input_topic_name  | string | -        |   -                          | Yes       | Specify the name of the FT topics to connect      | Each element must start with a leading '/' |
+|       | joint_state_output_topic_name | string | -        |   -                          | Yes       | Specify the name of the IMU topics to connect     | Each element must start with a leading '/' |
