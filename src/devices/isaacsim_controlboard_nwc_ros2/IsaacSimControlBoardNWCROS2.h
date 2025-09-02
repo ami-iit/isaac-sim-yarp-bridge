@@ -9,7 +9,7 @@
 #include <yarp/dev/IPreciselyTimed.h>
 
 #include <rclcpp/node.hpp>
-#include <rclcpp/executors/single_threaded_executor.hpp>
+#include <rclcpp/executors/multi_threaded_executor.hpp>
 #include <sensor_msgs/msg/joint_state.hpp>
 
 #include <memory>
@@ -439,6 +439,33 @@ public:
 
 private:
 
+    void updateMeasurements(const sensor_msgs::msg::JointState::ConstSharedPtr msg);
 
+    class CBNode : public rclcpp::Node
+    {
+    public:
+        explicit CBNode(const std::string& node_name, const std::string& topic_name, IsaacSimControlBoardNWCROS2* parent);
+    private:
+        rclcpp::Subscription<sensor_msgs::msg::JointState>::SharedPtr m_subscription;
+    };
+
+    struct JointsState
+    {
+        std::vector<std::string> name;
+        std::vector<double> position;
+        std::vector<double> velocity;
+        std::vector<double> effort;
+        double timestamp;
+        std::atomic<bool> valid{ false };
+        mutable std::mutex mutex;
+        void convert_to_vectors(const sensor_msgs::msg::JointState::ConstSharedPtr& js);
+    };
+
+    std::shared_ptr<CBNode> m_node;
+    std::unique_ptr<rclcpp::executors::MultiThreadedExecutor> m_executor;
+    std::mutex m_mutex;
+    std::thread m_executorThread;
+    IsaacSimControlBoardNWCROS2_ParamsParser m_paramsParser;
+    JointsState m_measurements;
 };
 #endif
