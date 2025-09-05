@@ -14,9 +14,6 @@
 # - domain_id [int]: The ROS2 domain ID (optional)
 # - useDomainIDEnvVar [bool]: Define whether to get the domain ID from an env var or not (optional)
 
-# Expects one output:
-# - outputs:bundle [bundle]: The output bundle. Note: the name is this weird to be coherent with the programmatic creation of the node
-
 import dataclasses
 import os
 
@@ -31,7 +28,7 @@ from rclpy.node import Node as ROS2Node
 
 
 @dataclasses.dataclass
-class ControlBoardDataSettings:
+class ControlBoardSettings:
     node_name: str
     node_set_parameters_service_name: str
     node_get_parameters_service_name: str
@@ -39,7 +36,7 @@ class ControlBoardDataSettings:
 
 
 # TODO: change this
-settings = ControlBoardDataSettings(
+settings = ControlBoardSettings(
     node_name="isaac_sim_control_board_state",
     node_set_parameters_service_name="ergocub/controlboard/set_parameters",
     node_get_parameters_service_name="ergocub/controlboard/get_parameters",
@@ -131,60 +128,6 @@ def choose_domain_id(db) -> int:
     return int(domain_id_input)
 
 
-def set_values_to_bundle(db):
-    # For some reason, in script nodes, a bundle output
-    # is not a classical output and needs to be retrieved
-    # differently, passing via the node API.
-    # Moreover, the name is edited with an outputs_ instead of outputs:
-
-    bundle_attr = db.node.get_attribute("outputs_outputs:bundle")
-    if not bundle_attr.is_valid():
-        db.log_error("Failed to add get the output bundle")
-        return False
-    bundle = bundle_attr.get()
-
-    state = db.per_instance_state.state
-    # The control modes are of type int[]
-    attr = bundle.create_attribute(
-        name="control_modes",
-        element_count=len(state.control_modes),
-        type=og.Type(
-            base_type=og.BaseDataType.INT,
-            tuple_count=1,
-            array_depth=1,
-            role=og.AttributeRole.VECTOR,
-        ),
-    )
-    if not attr.is_valid():
-        db.log_error("Failed to add control_modes attribute to bundle")
-        return False
-
-    if not attr.set(state.control_modes):
-        db.log_error("Failed to set control_modes attribute to bundle")
-        return False
-
-    # The gains are double[3] and in this case, it is considered as a single element
-    # but with tuple count 3. Note that also array_depth changed from 1 to 0
-    attr = bundle.create_attribute(
-        name="position_pid_gains",
-        element_count=1,
-        type=og.Type(
-            base_type=og.BaseDataType.DOUBLE,
-            tuple_count=3,
-            array_depth=0,
-            role=og.AttributeRole.VECTOR,
-        ),
-    )
-    if not attr.is_valid():
-        db.log_error("Failed to add control_modes attribute to bundle")
-        return False
-
-    if not attr.set(state.position_pid_gains):
-        db.log_error("Failed to set control_modes attribute to bundle")
-        return False
-
-    return True
-
 
 def setup(db: og.Database):
     domain_id = choose_domain_id(db=db)
@@ -227,7 +170,6 @@ def compute(db: og.Database):
         setup(db)
 
     state = db.per_instance_state
-    set_values_to_bundle(db)
 
     if rclpy.ok(context=state.context):
         state.executor.spin_once(timeout_sec=settings.node_timeout)
