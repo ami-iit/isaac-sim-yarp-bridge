@@ -347,6 +347,13 @@ class ControlBoardPID:
 
         return self.output
 
+    def update_gains(self, p, i, d, max_integral, max_output):
+        self.kp = p
+        self.ki = i
+        self.kd = d
+        self.max_integral = max_integral
+        self.max_output = max_output
+
     def reset(self):
         self.integral_state = 0.0
         self.previous_error = 0.0
@@ -493,8 +500,11 @@ def get_pid_output(
         script_state.pids[joint_index] = {}
 
     control_mode = script_state.state.control_modes[joint_index]
-    if control_mode not in script_state.pids[joint_index]:
-        if control_mode == ControlMode.POSITION:  # position control
+
+    if control_mode == ControlMode.POSITION:
+        # TODO: add smoother
+        pid = script_state.pids[joint_index].get(control_mode, None)
+        if pid is None:
             script_state.pids[joint_index][control_mode] = ControlBoardPID(
                 p=script_state.state.position_p_gains[joint_index],
                 i=script_state.state.position_i_gains[joint_index],
@@ -502,21 +512,15 @@ def get_pid_output(
                 max_integral=script_state.state.position_max_integral[joint_index],
                 max_output=script_state.state.position_max_output[joint_index],
             )
-        if control_mode == ControlMode.IDLE:
-            script_state.pids[joint_index][control_mode] = None
+            pid = script_state.pids[joint_index][control_mode]
         else:
-            script_state.pids[joint_index][control_mode] = None
-            print(
-                f"Unsupported control mode {control_mode} "
-                f"for joint {script_state.state.joint_names[joint_index]}"
+            pid.update_gains(
+                p=script_state.state.position_p_gains[joint_index],
+                i=script_state.state.position_i_gains[joint_index],
+                d=script_state.state.position_d_gains[joint_index],
+                max_integral=script_state.state.position_max_integral[joint_index],
+                max_output=script_state.state.position_max_output[joint_index],
             )
-
-    pid = script_state.pids[joint_index][control_mode]
-    if pid is None:
-        return 0.0
-
-    if control_mode == ControlMode.POSITION:
-        # TODO: add smoother
 
         if script_state.state.previous_control_modes[joint_index] != control_mode:
             pid.reset()
@@ -539,7 +543,40 @@ def get_pid_output(
                 pid.set_refence(reference)
 
         return pid.compute(delta_time, measured_position)
+    elif control_mode == ControlMode.TORQUE:
+        if (
+            script_state.state.previous_control_modes[joint_index] != control_mode
+            or control_mode not in script_state.pids[joint_index]
+        ):
+            # For the torque mode, we don't set a PID, but we just store the reference
+            script_state.pids[joint_index][control_mode] = measured_effort
+        script_state.state.previous_control_modes[joint_index] = control_mode
+        if (
+            hasattr(db.inputs, "reference_joint_names")
+            and db.inputs.reference_joint_names is not None
+            and name in db.inputs.reference_joint_names
+        ):
+            cmd_index = db.inputs.reference_joint_names.index(name)
+            if (
+                hasattr(db.inputs, "reference_effort_commands")
+                and db.inputs.reference_effort_commands is not None
+                and cmd_index < len(db.inputs.reference_effort_commands)
+                and db.inputs.reference_effort_commands[cmd_index] is not None
+            ):
+                reference = db.inputs.reference_effort_commands[cmd_index]
+                script_state.pids[joint_index][control_mode] = reference
+
+        return script_state.pids[joint_index][control_mode]
+
+    elif control_mode == ControlMode.IDLE:
+        script_state.state.previous_control_modes[joint_index] = control_mode
+        return 0.0
     else:
+        script_state.state.previous_control_modes[joint_index] = control_mode
+        db.log_error(
+            f"Unsupported control mode {control_mode} "
+            f"for joint {script_state.state.joint_names[joint_index]}"
+        )
         return 0.0
 
 
