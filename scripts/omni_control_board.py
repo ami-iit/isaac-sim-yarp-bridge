@@ -13,7 +13,7 @@
 # Expects eight inputs:
 # - timestamp [float]: The current simulation time (in seconds)
 # - deltaTime [float]: Time passed since last compute (in seconds)
-# - refence_joint_names [list[str]]: The list of joint names (optional)
+# - reference_joint_names [list[str]]: The list of joint names for the input reference commands.
 # - reference_position_commands [list[float]]: The list of joint position commands.
 # - reference_velocity_commands [list[float]]: The list of joint velocity commands.
 # - reference_effort_commands [list[float]]: The list of joint effort commands.
@@ -54,6 +54,11 @@ class ControlBoardSettings:
     position_max_integral: list[float]
     position_max_output: list[float]
     position_default_velocity: float
+    velocity_p_gains: list[float]
+    velocity_i_gains: list[float]
+    velocity_d_gains: list[float]
+    velocity_max_integral: list[float]
+    velocity_max_output: list[float]
 
 
 # TODO: change this
@@ -122,6 +127,11 @@ settings = ControlBoardSettings(
     position_max_integral=[10.0] * 51,
     position_max_output=[100.0] * 51,
     position_default_velocity=10.0 / 180.0 * math.pi,  # rad/s
+    velocity_p_gains=[1.0] * 51,
+    velocity_i_gains=[0.0] * 51,
+    velocity_d_gains=[0.0] * 51,
+    velocity_max_integral=[0.0] * 51,
+    velocity_max_output=[100.0] * 51,
 )
 
 
@@ -147,6 +157,13 @@ class ControlBoardState:
     position_max_integral: list[float]
     position_max_output: list[float]
 
+    # Velocity PID settings
+    velocity_p_gains: list[float]
+    velocity_i_gains: list[float]
+    velocity_d_gains: list[float]
+    velocity_max_integral: list[float]
+    velocity_max_output: list[float]
+
     # Position PID state
     position_pid_references: list[float]
     position_pid_errors: list[float]
@@ -157,6 +174,11 @@ class ControlBoardState:
     position_direct_pid_references: list[float]
     position_direct_pid_errors: list[float]
     position_direct_pid_outputs: list[float]
+
+    # Velocity PID state
+    velocity_pid_references: list[float]
+    velocity_pid_errors: list[float]
+    velocity_pid_outputs: list[float]
 
     # Torque PID state
     torque_pid_references: list[float]
@@ -173,6 +195,11 @@ class ControlBoardState:
         self.position_d_gains = s.position_d_gains
         self.position_max_integral = s.position_max_integral
         self.position_max_output = s.position_max_output
+        self.velocity_p_gains = s.velocity_p_gains
+        self.velocity_i_gains = s.velocity_i_gains
+        self.velocity_d_gains = s.velocity_d_gains
+        self.velocity_max_integral = s.velocity_max_integral
+        self.velocity_max_output = s.velocity_max_output
         self.position_pid_references = [float("nan")] * n_joints
         self.position_pid_errors = [float("nan")] * n_joints
         self.position_pid_outputs = [float("nan")] * n_joints
@@ -180,6 +207,9 @@ class ControlBoardState:
         self.position_direct_pid_references = [float("nan")] * n_joints
         self.position_direct_pid_errors = [float("nan")] * n_joints
         self.position_direct_pid_outputs = [float("nan")] * n_joints
+        self.velocity_pid_references = [float("nan")] * n_joints
+        self.velocity_pid_errors = [float("nan")] * n_joints
+        self.velocity_pid_outputs = [float("nan")] * n_joints
         self.torque_pid_references = [float("nan")] * n_joints
         # Since we output directly the effort in torque mode, the error is always 0
         self.torque_pid_errors = [0.0] * n_joints
@@ -795,6 +825,49 @@ def get_pid_output(
 
         return pid.compute(delta_time, measured_position)
 
+    elif control_mode == ControlMode.VELOCITY:
+        pid = script_state.pids[joint_index].get(control_mode, None)
+        if pid is None:
+            script_state.pids[joint_index][control_mode] = ControlBoardPID(
+                p=script_state.state.velocity_p_gains[joint_index],
+                i=script_state.state.velocity_i_gains[joint_index],
+                d=script_state.state.velocity_d_gains[joint_index],
+                max_integral=script_state.state.velocity_max_integral[joint_index],
+                max_output=script_state.state.velocity_max_output[joint_index],
+                default_velocity=settings.position_default_velocity,  # Not used in velocity mode
+            )
+            pid = script_state.pids[joint_index][control_mode]
+        else:
+            pid.update_gains(
+                p=script_state.state.velocity_p_gains[joint_index],
+                i=script_state.state.velocity_i_gains[joint_index],
+                d=script_state.state.velocity_d_gains[joint_index],
+                max_integral=script_state.state.velocity_max_integral[joint_index],
+                max_output=script_state.state.velocity_max_output[joint_index],
+            )
+
+        if script_state.state.previous_control_modes[joint_index] != control_mode:
+            pid.reset()
+        script_state.state.previous_control_modes[joint_index] = control_mode
+
+        if (
+            hasattr(db.inputs, "reference_joint_names")
+            and db.inputs.reference_joint_names is not None
+            and name in db.inputs.reference_joint_names
+        ):
+            cmd_index = db.inputs.reference_joint_names.index(name)
+            if (
+                hasattr(db.inputs, "reference_velocity_commands")
+                and db.inputs.reference_velocity_commands is not None
+                and cmd_index < len(db.inputs.reference_velocity_commands)
+                and db.inputs.reference_velocity_commands[cmd_index] is not None
+            ):
+                reference = db.inputs.reference_velocity_commands[cmd_index]
+                reference = max(min(reference, max_velocity), -max_velocity)
+                pid.set_reference(reference)
+
+        return pid.compute(delta_time, measured_velocity)
+
     elif control_mode == ControlMode.TORQUE:
         if (
             script_state.state.previous_control_modes[joint_index] != control_mode
@@ -840,12 +913,14 @@ def update_state(db: og.Database):
     for i in range(len(script_state.state.joint_names)):
         position_pid = None
         position_direct_pid = None
+        velocity_pid = None
         torque_reference = None
         if i in script_state.pids:
             position_pid = script_state.pids[i].get(ControlMode.POSITION, None)
             position_direct_pid = script_state.pids[i].get(
                 ControlMode.POSITION_DIRECT, None
             )
+            velocity_pid = script_state.pids[i].get(ControlMode.VELOCITY, None)
             torque_reference = script_state.pids[i].get(ControlMode.TORQUE, None)
 
         if position_pid:
@@ -871,6 +946,14 @@ def update_state(db: og.Database):
             script_state.state.position_direct_pid_outputs[i] = (
                 position_direct_pid.get_output()
             )
+
+        if velocity_pid:
+            reference = velocity_pid.get_reference()
+            if reference:
+                script_state.state.velocity_pid_references[i] = reference
+
+            script_state.state.velocity_pid_errors[i] = velocity_pid.get_error()
+            script_state.state.velocity_pid_outputs[i] = velocity_pid.get_output()
 
         if torque_reference is not None:
             script_state.state.torque_pid_references[i] = torque_reference
@@ -969,7 +1052,6 @@ def internal_state():
 
 
 # TODO:
-# Add velocity control mode
 # Add current control mode
 # Add compliant mode
 #   Allow setting the impedance offset
