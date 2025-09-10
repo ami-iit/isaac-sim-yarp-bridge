@@ -135,13 +135,33 @@ class ControlMode(enum.IntEnum):
 
 class ControlBoardState:
     joint_names: list[str]
+
+    # Control modes
     control_modes: list[int]
     previous_control_modes: list[int]
+
+    # Position PID settings
     position_p_gains: list[float]
     position_i_gains: list[float]
     position_d_gains: list[float]
     position_max_integral: list[float]
     position_max_output: list[float]
+
+    # Position PID state
+    position_pid_references: list[float]
+    position_pid_errors: list[float]
+    position_pid_outputs: list[float]
+    is_motion_done: list[bool]
+
+    # Position Direct PID state
+    position_direct_pid_references: list[float]
+    position_direct_pid_errors: list[float]
+    position_direct_pid_outputs: list[float]
+
+    # Torque PID state
+    torque_pid_references: list[float]
+    torque_pid_errors: list[float]
+    torque_pid_outputs: list[float]
 
     def __init__(self, s: ControlBoardSettings):
         self.joint_names = s.joint_names
@@ -153,6 +173,18 @@ class ControlBoardState:
         self.position_d_gains = s.position_d_gains
         self.position_max_integral = s.position_max_integral
         self.position_max_output = s.position_max_output
+        self.position_pid_references = [float("nan")] * n_joints
+        self.position_pid_errors = [float("nan")] * n_joints
+        self.position_pid_outputs = [float("nan")] * n_joints
+        self.is_motion_done = [False] * n_joints
+        self.position_direct_pid_references = [float("nan")] * n_joints
+        self.position_direct_pid_errors = [float("nan")] * n_joints
+        self.position_direct_pid_outputs = [float("nan")] * n_joints
+        self.torque_pid_references = [float("nan")] * n_joints
+        # Since we output directly the effort in torque mode, the error is always 0
+        self.torque_pid_errors = [0.0] * n_joints
+        self.torque_pid_outputs = [float("nan")] * n_joints
+        self.settings = s
 
 
 class ControlBoardNode(ROS2Node):
@@ -800,6 +832,51 @@ def get_pid_output(
         return 0.0
 
 
+def update_state(db: og.Database):
+    script_state = db.per_instance_state
+    if not script_state.initialized:
+        return
+
+    for i in range(len(script_state.state.joint_names)):
+        position_pid = None
+        position_direct_pid = None
+        torque_reference = None
+        if i in script_state.pids:
+            position_pid = script_state.pids[i].get(ControlMode.POSITION, None)
+            position_direct_pid = script_state.pids[i].get(
+                ControlMode.POSITION_DIRECT, None
+            )
+            torque_reference = script_state.pids[i].get(ControlMode.TORQUE, None)
+
+        if position_pid:
+            reference = position_pid.get_reference()
+            if reference:
+                script_state.state.position_pid_references[i] = reference
+
+            script_state.state.position_pid_errors[i] = position_pid.get_error()
+            script_state.state.position_pid_outputs[i] = position_pid.get_output()
+            if position_pid.smoother:
+                script_state.state.is_motion_done[i] = (
+                    position_pid.smoother.trajectory_completed
+                )
+
+        if position_direct_pid:
+            reference = position_direct_pid.get_reference()
+            if reference:
+                script_state.state.position_direct_pid_references[i] = reference
+
+            script_state.state.position_direct_pid_errors[i] = (
+                position_direct_pid.get_error()
+            )
+            script_state.state.position_direct_pid_outputs[i] = (
+                position_direct_pid.get_output()
+            )
+
+        if torque_reference is not None:
+            script_state.state.torque_pid_references[i] = torque_reference
+            script_state.state.torque_pid_outputs[i] = torque_reference
+
+
 def compute(db: og.Database):
     if (
         not hasattr(db.per_instance_state, "initialized")
@@ -870,6 +947,8 @@ def compute(db: og.Database):
         efforts=output_effort, joint_indices=script_state.robot_joint_indices
     )
 
+    update_state(db)
+
     timestamp = (
         db.inputs.timestamp
         if hasattr(db.inputs, "timestamp") and db.inputs.timestamp is not None
@@ -894,14 +973,8 @@ def internal_state():
 # Add current control mode
 # Add compliant mode
 #   Allow setting the impedance offset
-# Update the state with the outputs of the PIDs
-#   PID reference
-#   PID error
-#   PID output
-#   motion done
-#   last joint fault
-#
 # Publish the motor state
+# Put the joint in HF if the effort is too high
 
 # TODO: missing info:
 # - pid error limit
