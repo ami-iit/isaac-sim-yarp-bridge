@@ -53,12 +53,14 @@ class ControlBoardSettings:
     position_d_gains: list[float]
     position_max_integral: list[float]
     position_max_output: list[float]
+    position_max_error: list[float]
     position_default_velocity: float
     velocity_p_gains: list[float]
     velocity_i_gains: list[float]
     velocity_d_gains: list[float]
     velocity_max_integral: list[float]
     velocity_max_output: list[float]
+    velocity_max_error: list[float]
 
 
 # TODO: change this
@@ -66,7 +68,7 @@ settings = ControlBoardSettings(
     node_name="isaac_sim_control_board_state",
     node_set_parameters_service_name="ergocub/controlboard/set_parameters",
     node_get_parameters_service_name="ergocub/controlboard/get_parameters",
-    node_state_topic_name="ergocub/joint_states",
+    node_state_topic_name="ergocub/controlboard/joint_states",
     node_timeout=0.1,
     joint_names=[
         "camera_tilt",
@@ -127,11 +129,13 @@ settings = ControlBoardSettings(
     position_max_integral=[10.0] * 51,
     position_max_output=[100.0] * 51,
     position_default_velocity=10.0 / 180.0 * math.pi,  # rad/s
+    position_max_error=[math.pi] * 51,
     velocity_p_gains=[1.0] * 51,
     velocity_i_gains=[0.0] * 51,
     velocity_d_gains=[0.0] * 51,
     velocity_max_integral=[0.0] * 51,
     velocity_max_output=[100.0] * 51,
+    velocity_max_error=[math.pi] * 51,
 )
 
 
@@ -158,6 +162,7 @@ class ControlBoardState:
     position_d_gains: list[float]
     position_max_integral: list[float]
     position_max_output: list[float]
+    position_max_error: list[float]
 
     # Velocity PID settings
     velocity_p_gains: list[float]
@@ -165,6 +170,7 @@ class ControlBoardState:
     velocity_d_gains: list[float]
     velocity_max_integral: list[float]
     velocity_max_output: list[float]
+    velocity_max_error: list[float]
 
     # Position PID state
     position_pid_references: list[float]
@@ -198,11 +204,13 @@ class ControlBoardState:
         self.position_d_gains = s.position_d_gains
         self.position_max_integral = s.position_max_integral
         self.position_max_output = s.position_max_output
+        self.position_max_error = s.position_max_error
         self.velocity_p_gains = s.velocity_p_gains
         self.velocity_i_gains = s.velocity_i_gains
         self.velocity_d_gains = s.velocity_d_gains
         self.velocity_max_integral = s.velocity_max_integral
         self.velocity_max_output = s.velocity_max_output
+        self.velocity_max_error = s.velocity_max_error
         self.position_pid_references = [float("nan")] * n_joints
         self.position_pid_errors = [float("nan")] * n_joints
         self.position_pid_outputs = [float("nan")] * n_joints
@@ -512,6 +520,7 @@ class ControlBoardPID:
     kd: float
     max_integral: float
     max_output: float
+    max_error: float
     default_velocity: float
     reference: float | None
     input_reference: float | None
@@ -522,12 +531,13 @@ class ControlBoardPID:
     output: float
     smoother: None
 
-    def __init__(self, p, i, d, max_integral, max_output, default_velocity):
+    def __init__(self, p, i, d, max_integral, max_output, max_error, default_velocity):
         self.kp = p
         self.ki = i
         self.kd = d
         self.max_integral = max_integral
         self.max_output = max_output
+        self.max_error = max_error
         self.default_velocity = default_velocity
 
         self.measurement = 0.0
@@ -581,6 +591,7 @@ class ControlBoardPID:
         self.input_reference_velocity = None  # reset the input reference velocity
 
         error = self.reference - measurement
+        error = max(min(error, self.max_error), -self.max_error)
         # Proportional term
         p_term = self.kp * error
 
@@ -604,12 +615,13 @@ class ControlBoardPID:
 
         return self.output
 
-    def update_gains(self, p, i, d, max_integral, max_output):
+    def update_gains(self, p, i, d, max_integral, max_output, max_error):
         self.kp = p
         self.ki = i
         self.kd = d
         self.max_integral = max_integral
         self.max_output = max_output
+        self.max_error = max_error
 
     def reset(self):
         self.integral_state = 0.0
@@ -810,6 +822,7 @@ def get_pid_output(
                 d=script_state.state.position_d_gains[joint_index],
                 max_integral=script_state.state.position_max_integral[joint_index],
                 max_output=script_state.state.position_max_output[joint_index],
+                max_error=script_state.state.position_max_error[joint_index],
                 default_velocity=settings.position_default_velocity,
             )
             pid = script_state.pids[joint_index][control_mode]
@@ -820,6 +833,7 @@ def get_pid_output(
                 d=script_state.state.position_d_gains[joint_index],
                 max_integral=script_state.state.position_max_integral[joint_index],
                 max_output=script_state.state.position_max_output[joint_index],
+                max_error=script_state.state.position_max_error[joint_index],
             )
 
         if control_mode == ControlMode.POSITION and pid.smoother is None:
@@ -850,6 +864,7 @@ def get_pid_output(
                 d=script_state.state.velocity_d_gains[joint_index],
                 max_integral=script_state.state.velocity_max_integral[joint_index],
                 max_output=script_state.state.velocity_max_output[joint_index],
+                max_error=script_state.state.velocity_max_error[joint_index],
                 default_velocity=settings.position_default_velocity,  # Not used in velocity mode
             )
             pid = script_state.pids[joint_index][control_mode]
@@ -860,6 +875,7 @@ def get_pid_output(
                 d=script_state.state.velocity_d_gains[joint_index],
                 max_integral=script_state.state.velocity_max_integral[joint_index],
                 max_output=script_state.state.velocity_max_output[joint_index],
+                max_error=script_state.state.velocity_max_error[joint_index],
             )
 
         if script_state.state.previous_control_modes[joint_index] != control_mode:
@@ -1063,7 +1079,6 @@ def internal_state():
 # Publish the motor state
 
 # TODO: missing info:
-# - pid error limit
 # - pid offset (??)
 # - disable/enable pid
 # - reset pid
