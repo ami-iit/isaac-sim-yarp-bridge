@@ -751,11 +751,10 @@ class ControlBoardData:
 
 
 def choose_domain_id(db) -> int:
-    """
-    Replicates ROS2Context selection logic:
-      - if use_env_var and ROS_DOMAIN_ID exists: use it
-      - otherwise use domain_id_input
-    """
+    # Replicates ROS2Context selection logic:
+    #   - if use_env_var and ROS_DOMAIN_ID exists: use it
+    #   - otherwise use domain_id_input
+
     domain_id_input = (
         db.inputs.domain_id
         if hasattr(db.inputs, "domain_id") and db.inputs.domain_id is not None
