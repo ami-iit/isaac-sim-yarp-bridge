@@ -1887,11 +1887,11 @@ def create_control_board_subcompound(
             ),
             (
                 cb_script_name + ".inputs:node_state_topic_name",
-                board_settings.name + "/joint_state",
+                cb_topic_prefix + "/joint_state",
             ),
             (
                 cb_script_name + ".inputs:node_motor_state_topic_name",
-                board_settings.name + "/motor_state",
+                cb_topic_prefix + "/motor_state",
             ),
             (cb_script_name + ".inputs:node_timeout", full_settings.node_timeout),
             (cb_script_name + ".inputs:joint_names", board_settings.joint_names),
