@@ -60,7 +60,7 @@ import isaacsim.core.utils.stage as stage_utils
 import numpy as np
 import omni.graph.core as og
 import rclpy
-from isaacsim.core.api.robots import Robot
+from isaacsim.core.api.robots import RobotView
 from rcl_interfaces.msg import ParameterType, ParameterValue, SetParametersResult
 from rcl_interfaces.srv import GetParameters as GetParametersSrv
 from rcl_interfaces.srv import SetParameters as SetParametersSrv
@@ -100,7 +100,7 @@ class ControlBoardSettings:
     velocity_max_output: list[float]
     velocity_max_error: list[float]
     # Motor settings
-    gearbox_ratios: list[float]  # Motor to joint
+    gearbox_ratios: list[float]  # Motor motion over joint motion, expected > 1
     motor_torque_constants: list[float]
     motor_current_noise_variance: list[float]
     motor_spring_stiffness: list[float]
@@ -120,6 +120,12 @@ class ControlMode(enum.IntEnum):
 class ControlBoardState:
     joint_names: list[str]
 
+    # Joint limits
+    max_positions: list[float]
+    min_positions: list[float]
+    max_velocities: list[float]
+    max_efforts: list[float]
+
     # Control modes
     control_modes: list[int]
     previous_control_modes: list[int]
@@ -133,6 +139,7 @@ class ControlBoardState:
     position_max_integral: list[float]
     position_max_output: list[float]
     position_max_error: list[float]
+    home_positions: list[float]
 
     # Compliant mode settings
     compliant_stiffness: list[float]
@@ -188,7 +195,7 @@ class ControlBoardState:
     motor_spring_stiffness: list[float]
     motor_max_currents: list[float]
 
-    def __init__(self, settings):
+    def __init__(self, settings, robot, joint_indices):
         self.joint_names = settings.joint_names
         n_joints = len(self.joint_names)
         self.control_modes = [ControlMode.POSITION] * n_joints
@@ -242,6 +249,20 @@ class ControlBoardState:
         self.motor_spring_stiffness = settings.motor_spring_stiffness
         self.motor_max_currents = settings.motor_max_currents
         self.settings = settings
+
+        # Get joint limits from the robot
+        dof_limits = robot.get_dof_limits()
+        self.max_positions = [dof_limits[0][j][0] for j in joint_indices]
+        self.min_positions = [dof_limits[0][j][1] for j in joint_indices]
+        self.max_velocities = robot.get_joint_max_velocities(
+            joint_indices=joint_indices
+        )
+        self.max_efforts = robot.get_max_efforts(joint_indices=joint_indices)
+
+        # Get the home positions from the robot
+        default_state = robot.get_joints_default_state()
+        default_positions = default_state.positions[0]
+        self.home_positions = [default_positions[j] for j in joint_indices]
 
 
 class ControlBoardNode(ROS2Node):
@@ -850,7 +871,7 @@ def create_robot_object_cb(db: og.Database, name, joint_names):
     if not robot_prim.HasAPI("IsaacRobotAPI"):
         db.log_error(f"The specified prim ({robot_prim}) is not a robot")
         return None
-    robot = Robot(prim_path=str(robot_prim.GetPath()), name=name)
+    robot = RobotView(prim_paths_expr=str(robot_prim.GetPath()), name=name)
     robot.initialize()
 
     joint_indices = []
@@ -867,23 +888,6 @@ def create_robot_object_cb(db: og.Database, name, joint_names):
 def setup_cb(db: og.Database):
     domain_id = choose_domain_id(db=db)
     settings = fill_settings_from_db(db=db)
-    db.per_instance_state.state = ControlBoardState(settings=settings)
-    db.per_instance_state.pids = {}
-    db.per_instance_state.context = ROS2Context()
-    db.per_instance_state.context.init(domain_id=domain_id)
-    db.per_instance_state.node = ControlBoardNode(
-        node_name=settings.node_name,
-        set_service_name=settings.node_set_parameters_service_name,
-        get_service_name=settings.node_get_parameters_service_name,
-        state_topic_name=settings.node_state_topic_name,
-        motor_state_topic_name=settings.node_motor_state_topic_name,
-        context=db.per_instance_state.context,
-        state=db.per_instance_state.state,
-    )
-    db.per_instance_state.executor = SingleThreadedExecutor(
-        context=db.per_instance_state.context
-    )
-    db.per_instance_state.executor.add_node(db.per_instance_state.node)
 
     output = create_robot_object_cb(
         db, name=settings.node_name, joint_names=settings.joint_names
@@ -902,6 +906,26 @@ def setup_cb(db: og.Database):
 
     db.per_instance_state.robot = robot
     db.per_instance_state.robot_joint_indices = robot_joint_indices
+
+    db.per_instance_state.state = ControlBoardState(
+        settings=settings, robot=robot, joint_indices=robot_joint_indices
+    )
+    db.per_instance_state.pids = {}
+    db.per_instance_state.context = ROS2Context()
+    db.per_instance_state.context.init(domain_id=domain_id)
+    db.per_instance_state.node = ControlBoardNode(
+        node_name=settings.node_name,
+        set_service_name=settings.node_set_parameters_service_name,
+        get_service_name=settings.node_get_parameters_service_name,
+        state_topic_name=settings.node_state_topic_name,
+        motor_state_topic_name=settings.node_motor_state_topic_name,
+        context=db.per_instance_state.context,
+        state=db.per_instance_state.state,
+    )
+    db.per_instance_state.executor = SingleThreadedExecutor(
+        context=db.per_instance_state.context
+    )
+    db.per_instance_state.executor.add_node(db.per_instance_state.node)
 
     db.per_instance_state.initialized = True
 
@@ -1356,7 +1380,9 @@ def compute(db: og.Database):
     script_state = db.per_instance_state
     cb_state = script_state.state
 
-    measured_positions = script_state.robot.get_joint_positions()
+    measured_positions = script_state.robot.get_joint_positions(
+        joint_indices=script_state.robot_joint_indices
+    )
     if measured_positions is None:
         db.log_warning(
             f"Failed to get joint positions in {script_state.robot.name}. "
@@ -1365,12 +1391,16 @@ def compute(db: og.Database):
         script_state.robot.initialize()
         return False
 
-    measured_velocities = script_state.robot.get_joint_velocities()
+    measured_velocities = script_state.robot.get_joint_velocities(
+        joint_indices=script_state.robot_joint_indices
+    )
     if measured_velocities is None:
         db.log_warning(f"Failed to get joint velocities in {script_state.robot.name}. ")
         return False
 
-    measured_efforts = script_state.robot.get_measured_joint_efforts()
+    measured_efforts = script_state.robot.get_measured_joint_efforts(
+        joint_indices=script_state.robot_joint_indices
+    )
     if measured_efforts is None:
         db.log_warning(f"Failed to get joint efforts in {script_state.robot.name}. ")
         return False
@@ -1381,23 +1411,13 @@ def compute(db: og.Database):
     reset_requested_pids(db)
 
     output_effort = []
-    positions = [0.0] * len(cb_state.joint_names)
-    velocities = [0.0] * len(cb_state.joint_names)
-    efforts = [0.0] * len(cb_state.joint_names)
     motor_positions = [0.0] * len(cb_state.joint_names)
     motor_velocities = [0.0] * len(cb_state.joint_names)
     motor_currents = [0.0] * len(cb_state.joint_names)
     for i in range(len(cb_state.joint_names)):
-        robot_index = script_state.robot_joint_indices[i]
-
-        measured_position = measured_positions[robot_index]
-        positions[i] = measured_position
-
-        measured_velocity = measured_velocities[robot_index]
-        velocities[i] = measured_velocity
-
-        measured_effort = measured_efforts[robot_index]
-        efforts[i] = measured_effort
+        measured_position = measured_positions[i]
+        measured_velocity = measured_velocities[i]
+        measured_effort = measured_efforts[i]
 
         motor_position, motor_velocity, motor_current = compute_motor_state(
             db, i, measured_position, measured_velocity, measured_effort
@@ -1406,18 +1426,10 @@ def compute(db: og.Database):
         motor_velocities[i] = motor_velocity
         motor_currents[i] = motor_current
 
-        has_limits = script_state.robot.dof_properties["hasLimits"][robot_index]
-
-        if has_limits:
-            lower_limit = script_state.robot.dof_properties["lower"][robot_index]
-            upper_limit = script_state.robot.dof_properties["upper"][robot_index]
-            max_velocity = script_state.robot.dof_properties["maxVelocity"][robot_index]
-            max_effort = script_state.robot.dof_properties["maxEffort"][robot_index]
-        else:
-            lower_limit = -float("inf")
-            upper_limit = float("inf")
-            max_velocity = float("inf")
-            max_effort = float("inf")
+        upper_limit = cb_state.max_positions[i]
+        lower_limit = cb_state.min_positions[i]
+        max_velocity = cb_state.max_velocities[i]
+        max_effort = cb_state.max_efforts[i]
 
         max_current = (
             cb_state.motor_max_currents[i]
@@ -1464,9 +1476,9 @@ def compute(db: og.Database):
     )
     script_state.node.publish_joint_state(
         timestamp=timestamp,
-        positions=positions,
-        velocities=velocities,
-        efforts=efforts,
+        positions=measured_positions,
+        velocities=measured_velocities,
+        efforts=measured_efforts,
     )
     script_state.node.publish_motor_state(
         timestamp=timestamp,
