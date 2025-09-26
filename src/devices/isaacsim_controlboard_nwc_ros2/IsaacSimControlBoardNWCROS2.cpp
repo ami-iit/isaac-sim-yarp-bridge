@@ -9,6 +9,61 @@ YARP_LOG_COMPONENT(CB, "yarp.device.IsaacSimControlBoardNWCROS2")
 
 constexpr double rad2deg = 180.0 / M_PI;
 
+static const std::string joint_names_tag = "joint_names";
+static const std::string max_positions_tag = "max_positions";
+static const std::string min_positions_tag = "min_positions";
+static const std::string max_velocities_tag = "max_velocities";
+static const std::string max_efforts_tag = "max_efforts";
+static const std::string control_modes_tag = "control_modes";
+static const std::string previous_control_modes_tag = "previous_control_modes";
+static const std::string compliant_modes_tag = "compliant_modes";
+static const std::string hf_messages_tag = "hf_messages";
+static const std::string position_p_gains_tag = "position_p_gains";
+static const std::string position_i_gains_tag = "position_i_gains";
+static const std::string position_d_gains_tag = "position_d_gains";
+static const std::string position_max_integral_tag = "position_max_integral";
+static const std::string position_max_output_tag = "position_max_output";
+static const std::string position_max_error_tag = "position_max_error";
+static const std::string home_positions_tag = "home_positions";
+static const std::string compliant_stiffness_tag = "compliant_stiffness";
+static const std::string compliant_damping_tag = "compliant_damping";
+static const std::string velocity_p_gains_tag = "velocity_p_gains";
+static const std::string velocity_i_gains_tag = "velocity_i_gains";
+static const std::string velocity_d_gains_tag = "velocity_d_gains";
+static const std::string velocity_max_integral_tag = "velocity_max_integral";
+static const std::string velocity_max_output_tag = "velocity_max_output";
+static const std::string velocity_max_error_tag = "velocity_max_error";
+static const std::string position_pid_references_tag = "position_pid_references";
+static const std::string position_pid_errors_tag = "position_pid_errors";
+static const std::string position_pid_outputs_tag = "position_pid_outputs";
+static const std::string is_motion_done_tag = "is_motion_done";
+static const std::string position_pid_enabled_tag = "position_pid_enabled";
+static const std::string position_pid_to_reset_tag = "position_pid_to_reset";
+static const std::string position_pid_to_stop_tag = "position_pid_to_stop";
+static const std::string position_direct_pid_references_tag = "position_direct_pid_references";
+static const std::string position_direct_pid_errors_tag = "position_direct_pid_errors";
+static const std::string position_direct_pid_outputs_tag = "position_direct_pid_outputs";
+static const std::string position_direct_pid_enabled_tag = "position_direct_pid_enabled";
+static const std::string position_direct_pid_to_reset_tag = "position_direct_pid_to_reset";
+static const std::string velocity_pid_references_tag = "velocity_pid_references";
+static const std::string velocity_pid_errors_tag = "velocity_pid_errors";
+static const std::string velocity_pid_outputs_tag = "velocity_pid_outputs";
+static const std::string velocity_pid_enabled_tag = "velocity_pid_enabled";
+static const std::string velocity_pid_to_reset_tag = "velocity_pid_to_reset";
+static const std::string torque_pid_references_tag = "torque_pid_references";
+static const std::string torque_pid_errors_tag = "torque_pid_errors";
+static const std::string torque_pid_outputs_tag = "torque_pid_outputs";
+static const std::string torque_pid_enabled_tag = "torque_pid_enabled";
+static const std::string current_pid_references_tag = "current_pid_references";
+static const std::string current_pid_errors_tag = "current_pid_errors";
+static const std::string current_pid_outputs_tag = "current_pid_outputs";
+static const std::string current_pid_enabled_tag = "current_pid_enabled";
+static const std::string gearbox_ratios_tag = "gearbox_ratios";
+static const std::string motor_torque_constants_tag = "motor_torque_constants";
+static const std::string motor_current_noise_variance_tag = "motor_current_noise_variance";
+static const std::string motor_spring_stiffness_tag = "motor_spring_stiffness";
+static const std::string motor_max_currents_tag = "motor_max_currents";
+
 yarp::dev::IsaacSimControlBoardNWCROS2::~IsaacSimControlBoardNWCROS2()
 {
     close();
@@ -60,6 +115,107 @@ bool yarp::dev::IsaacSimControlBoardNWCROS2::close()
 
 bool yarp::dev::IsaacSimControlBoardNWCROS2::setPid(const yarp::dev::PidControlTypeEnum& pidtype, int j, const yarp::dev::Pid& p)
 {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    std::string errorPrefix = "[setPid] ";
+    std::vector<rcl_interfaces::msg::Parameter> params;
+    if (pidtype == yarp::dev::PidControlTypeEnum::VOCAB_PIDTYPE_POSITION)
+    {
+        rcl_interfaces::msg::Parameter p_param;
+        std::string suffix_tag = "[" + std::to_string(j) + "]";
+        p_param.name = position_p_gains_tag + suffix_tag;
+        p_param.value.type = rcl_interfaces::msg::ParameterType::PARAMETER_DOUBLE;
+        p_param.value.double_value = p.kp;
+        params.push_back(p_param);
+        rcl_interfaces::msg::Parameter i_param;
+        i_param.name = position_i_gains_tag + suffix_tag;
+        i_param.value.type = rcl_interfaces::msg::ParameterType::PARAMETER_DOUBLE;
+        i_param.value.double_value = p.ki;
+        params.push_back(i_param);
+        rcl_interfaces::msg::Parameter d_param;
+        d_param.name = position_d_gains_tag + suffix_tag;
+        d_param.value.type = rcl_interfaces::msg::ParameterType::PARAMETER_DOUBLE;
+        d_param.value.double_value = p.kd;
+        params.push_back(d_param);
+        rcl_interfaces::msg::Parameter max_integral_param;
+        max_integral_param.name = position_max_integral_tag + suffix_tag;
+        max_integral_param.value.type = rcl_interfaces::msg::ParameterType::PARAMETER_DOUBLE;
+        max_integral_param.value.double_value = p.max_int;
+        params.push_back(max_integral_param);
+        rcl_interfaces::msg::Parameter max_output_param;
+        max_output_param.name = position_max_output_tag + suffix_tag;
+        max_output_param.value.type = rcl_interfaces::msg::ParameterType::PARAMETER_DOUBLE;
+        max_output_param.value.double_value = p.max_output;
+        params.push_back(max_output_param);
+        auto results = m_node->setParameters(params);
+        if (results.size() != params.size())
+        {
+            yCError(CB) << errorPrefix << "Error while setting position pid parameters.";
+            return false;
+        }
+        bool failed = false;
+        for (const auto& res : results)
+        {
+            if (!res.successful)
+            {
+                yCError(CB) << errorPrefix << "Error while setting position pid parameter:" << res.reason;
+                failed = true;
+            }
+        }
+        return failed;
+    }
+    if (pidtype == yarp::dev::PidControlTypeEnum::VOCAB_PIDTYPE_VELOCITY)
+    {
+        rcl_interfaces::msg::Parameter p_param;
+        std::string suffix_tag = "[" + std::to_string(j) + "]";
+        p_param.name = velocity_p_gains_tag + suffix_tag;
+        p_param.value.type = rcl_interfaces::msg::ParameterType::PARAMETER_DOUBLE;
+        p_param.value.double_value = p.kp;
+        params.push_back(p_param);
+        rcl_interfaces::msg::Parameter i_param;
+        i_param.name = velocity_i_gains_tag + suffix_tag;
+        i_param.value.type = rcl_interfaces::msg::ParameterType::PARAMETER_DOUBLE;
+        i_param.value.double_value = p.ki;
+        params.push_back(i_param);
+        rcl_interfaces::msg::Parameter d_param;
+        d_param.name = velocity_d_gains_tag + suffix_tag;
+        d_param.value.type = rcl_interfaces::msg::ParameterType::PARAMETER_DOUBLE;
+        d_param.value.double_value = p.kd;
+        params.push_back(d_param);
+        rcl_interfaces::msg::Parameter max_integral_param;
+        max_integral_param.name = velocity_max_integral_tag + suffix_tag;
+        max_integral_param.value.type = rcl_interfaces::msg::ParameterType::PARAMETER_DOUBLE;
+        max_integral_param.value.double_value = p.max_int;
+        params.push_back(max_integral_param);
+        rcl_interfaces::msg::Parameter max_output_param;
+        max_output_param.name = velocity_max_output_tag + suffix_tag;
+        max_output_param.value.type = rcl_interfaces::msg::ParameterType::PARAMETER_DOUBLE;
+        max_output_param.value.double_value = p.max_output;
+        params.push_back(max_output_param);
+        auto results = m_node->setParameters(params);
+        if (results.size() != params.size())
+        {
+            yCError(CB) << errorPrefix << "Error while setting velocity pid parameters.";
+            return false;
+        }
+        bool failed = false;
+        for (const auto& res : results)
+        {
+            if (!res.successful)
+            {
+                yCError(CB) << errorPrefix << "Error while setting velocity pid parameter:" << res.reason;
+                failed = true;
+            }
+        }
+        return failed;
+    }
+    if (pidtype == yarp::dev::PidControlTypeEnum::VOCAB_PIDTYPE_TORQUE ||
+             pidtype == yarp::dev::PidControlTypeEnum::VOCAB_PIDTYPE_CURRENT)
+    {
+        yCWarning(CB) << errorPrefix << "Setting torque/current pid does not have any effect on Isaac Sim.";
+        return true;
+    }
+
+    yCError(CB) << errorPrefix << "Unknown pid type.";
     return false;
 }
 
@@ -1272,7 +1428,6 @@ yarp::dev::IsaacSimControlBoardNWCROS2::CBNode::CBNode(const std::string& node_n
     m_getParamClient = this->create_client<rcl_interfaces::srv::GetParameters>(get_param_service_name);
     m_setParamClient = this->create_client<rcl_interfaces::srv::SetParameters>(set_param_service_name);
 
-    // convert double to chrono
     m_requestsTimeout = std::chrono::duration<double>(requests_timeout_sec);
 }
 
