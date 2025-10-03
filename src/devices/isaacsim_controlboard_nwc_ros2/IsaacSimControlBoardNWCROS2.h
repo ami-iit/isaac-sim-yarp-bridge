@@ -479,7 +479,7 @@ private:
         std::vector<double> position;
         std::vector<double> velocity;
         std::vector<double> effort;
-        double timestamp;
+        yarp::os::Stamp timestamp;
         std::atomic<bool> valid{ false };
         mutable std::mutex mutex;
         void convert_to_vectors(const sensor_msgs::msg::JointState::ConstSharedPtr& js);
