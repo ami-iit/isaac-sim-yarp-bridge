@@ -1842,7 +1842,7 @@ bool yarp::dev::IsaacSimControlBoardNWCROS2::getEncodersTimed(double* encs, doub
     std::copy(m_jointState.position.begin(), m_jointState.position.end(), encs);
 
     // Copy in timestamp a vector of size equal to the number of joints and equal to the timestamp of the measurement
-    std::fill(t, t + m_jointState.position.size(), m_jointState.timestamp);
+    std::fill(t, t + m_jointState.position.size(), m_jointState.timestamp.getTime());
 
     return true;
 }
@@ -1865,7 +1865,7 @@ bool yarp::dev::IsaacSimControlBoardNWCROS2::getEncoderTimed(int j, double* v, d
         return false;
     }
     *v = m_jointState.position[j];
-    *t = m_jointState.timestamp;
+    *t = m_jointState.timestamp.getTime();
     return true;
 }
 
@@ -2013,7 +2013,7 @@ bool yarp::dev::IsaacSimControlBoardNWCROS2::getMotorEncodersTimed(double* encs,
     std::lock_guard<std::mutex> lock_measurements(m_motorState.mutex);
     std::copy(m_motorState.position.begin(), m_motorState.position.end(), encs);
     // Copy in timestamp a vector of size equal to the number of motors and equal to the timestamp of the measurement
-    std::fill(t, t + m_motorState.position.size(), m_motorState.timestamp);
+    std::fill(t, t + m_motorState.position.size(), m_motorState.timestamp.getTime());
     return true;
 }
 
@@ -2033,7 +2033,7 @@ bool yarp::dev::IsaacSimControlBoardNWCROS2::getMotorEncoderTimed(int m, double*
         return false;
     }
     *v = m_motorState.position[m];
-    *t = m_motorState.timestamp;
+    *t = m_motorState.timestamp.getTime();
     return true;
 }
 
@@ -2942,7 +2942,10 @@ bool yarp::dev::IsaacSimControlBoardNWCROS2::getControlModes(int* modes)
         yCError(CB) << errorPrefix << "Error while getting control modes. Wrong parameter type.";
         return false;
     }
-    std::copy(results[0].integer_array_value.begin(), results[0].integer_array_value.end(), modes);
+    for (size_t i = 0; i < results[0].integer_array_value.size(); i++)
+    {
+        modes[i] = results[0].integer_array_value[i];
+    }
     return true;
 }
 
@@ -3080,87 +3083,257 @@ bool yarp::dev::IsaacSimControlBoardNWCROS2::setControlModes(int* modes)
 
 bool yarp::dev::IsaacSimControlBoardNWCROS2::setPosition(int j, double ref)
 {
+    // TODO
     return false;
 }
 
 bool yarp::dev::IsaacSimControlBoardNWCROS2::setPositions(const int n_joints, const int* joints, const double* dpos)
 {
+    // TODO
     return false;
 }
 
 bool yarp::dev::IsaacSimControlBoardNWCROS2::setPositions(const double* refs)
 {
+    // TODO
     return false;
 }
 
 bool yarp::dev::IsaacSimControlBoardNWCROS2::getRefPosition(const int joint, double* ref)
 {
+    // TODO
     return false;
 }
 
 bool yarp::dev::IsaacSimControlBoardNWCROS2::getRefPositions(double* refs)
 {
+    // TODO
     return false;
 }
 
 bool yarp::dev::IsaacSimControlBoardNWCROS2::getRefPositions(const int n_joint, const int* joints, double* refs)
 {
+    // TODO
     return false;
 }
 
 yarp::os::Stamp yarp::dev::IsaacSimControlBoardNWCROS2::getLastInputStamp()
 {
-    return yarp::os::Stamp();
+    std::lock_guard<std::mutex> lock(m_mutex);
+    std::string errorPrefix = "[getLastInputStamp] ";
+    if (!m_jointState.valid.load())
+    {
+        yCError(CB) << errorPrefix << "No valid data received yet.";
+        return yarp::os::Stamp();
+    }
+    std::lock_guard<std::mutex> lock_measurements(m_jointState.mutex);
+    return m_jointState.timestamp;
 }
 
 bool yarp::dev::IsaacSimControlBoardNWCROS2::velocityMove(const int n_joints, const int* joints, const double* spds)
 {
+    // TODO
     return false;
 }
 
 bool yarp::dev::IsaacSimControlBoardNWCROS2::getRefVelocity(const int joint, double* vel)
 {
+    // TODO
     return false;
 }
 
 bool yarp::dev::IsaacSimControlBoardNWCROS2::getRefVelocities(double* vels)
 {
+    // TODO
     return false;
 }
 
 bool yarp::dev::IsaacSimControlBoardNWCROS2::getRefVelocities(const int n_joint, const int* joints, double* vels)
 {
+    // TODO
     return false;
 }
 
 bool yarp::dev::IsaacSimControlBoardNWCROS2::getInteractionMode(int j, yarp::dev::InteractionModeEnum* mode)
 {
-    return false;
+    std::lock_guard<std::mutex> lock(m_mutex);
+    std::string errorPrefix = "[getInteractionMode] ";
+    std::string suffix_tag = "[" + std::to_string(j) + "]";
+    auto results = m_node->getParameters({ compliant_modes_tag + suffix_tag });
+    if (results.size() != 1)
+    {
+        yCError(CB) << errorPrefix << "Error while getting interaction mode for joint" << j << ".";
+        return false;
+    }
+    if (results[0].type == rcl_interfaces::msg::ParameterType::PARAMETER_NOT_SET)
+    {
+        yCError(CB) << errorPrefix << "Error while retrieving interaction mode for joint" << j << ".";
+        return false;
+    }
+    if (results[0].type != rcl_interfaces::msg::ParameterType::PARAMETER_BOOL)
+    {
+        yCError(CB) << errorPrefix << "Error while getting interaction mode for joint" << j << ". Wrong parameter type.";
+        return false;
+    }
+    *mode = results[0].bool_value ? yarp::dev::InteractionModeEnum::VOCAB_IM_COMPLIANT : yarp::dev::InteractionModeEnum::VOCAB_IM_STIFF;
+    return true;
 }
 
 bool yarp::dev::IsaacSimControlBoardNWCROS2::getInteractionModes(int n_joints, int* joints, yarp::dev::InteractionModeEnum* modes)
 {
-    return false;
+    std::lock_guard<std::mutex> lock(m_mutex);
+    std::string errorPrefix = "[getInteractionModes] ";
+    auto results = m_node->getParameters({ compliant_modes_tag });
+    if (results.size() != 1)
+    {
+        yCError(CB) << errorPrefix << "Error while getting interaction modes.";
+        return false;
+    }
+    if (results[0].type == rcl_interfaces::msg::ParameterType::PARAMETER_NOT_SET)
+    {
+        yCError(CB) << errorPrefix << "Error while retrieving interaction modes.";
+        return false;
+    }
+    if (results[0].type != rcl_interfaces::msg::ParameterType::PARAMETER_BOOL_ARRAY)
+    {
+        yCError(CB) << errorPrefix << "Error while getting interaction modes. Wrong parameter type.";
+        return false;
+    }
+    for (int i = 0; i < n_joints; i++)
+    {
+        int j = joints[i];
+        if (j < 0 || j >= static_cast<int>(results[0].bool_array_value.size()))
+        {
+            yCError(CB) << errorPrefix << "Index" << j << "out of range. Valid range is [0," << results[0].bool_array_value.size() - 1 << "]";
+            return false;
+        }
+        modes[i] = results[0].bool_array_value[j] ? yarp::dev::InteractionModeEnum::VOCAB_IM_COMPLIANT : yarp::dev::InteractionModeEnum::VOCAB_IM_STIFF;
+    }
+    return true;
 }
 
 bool yarp::dev::IsaacSimControlBoardNWCROS2::getInteractionModes(yarp::dev::InteractionModeEnum* modes)
 {
-    return false;
+    std::lock_guard<std::mutex> lock(m_mutex);
+    std::string errorPrefix = "[getInteractionModes] ";
+    auto results = m_node->getParameters({ compliant_modes_tag });
+    if (results.size() != 1)
+    {
+        yCError(CB) << errorPrefix << "Error while getting interaction modes.";
+        return false;
+    }
+    if (results[0].type == rcl_interfaces::msg::ParameterType::PARAMETER_NOT_SET)
+    {
+        yCError(CB) << errorPrefix << "Error while retrieving interaction modes.";
+        return false;
+    }
+    if (results[0].type != rcl_interfaces::msg::ParameterType::PARAMETER_BOOL_ARRAY)
+    {
+        yCError(CB) << errorPrefix << "Error while getting interaction modes. Wrong parameter type.";
+        return false;
+    }
+    for (size_t i = 0; i < results[0].bool_array_value.size(); i++)
+    {
+        modes[i] = results[0].bool_array_value[i] ? yarp::dev::InteractionModeEnum::VOCAB_IM_COMPLIANT : yarp::dev::InteractionModeEnum::VOCAB_IM_STIFF;
+    }
+    return true;
 }
 
 bool yarp::dev::IsaacSimControlBoardNWCROS2::setInteractionMode(int j, yarp::dev::InteractionModeEnum mode)
 {
-    return false;
+    std::lock_guard<std::mutex> lock(m_mutex);
+    std::string errorPrefix = "[setInteractionMode] ";
+    std::string suffix_tag = "[" + std::to_string(j) + "]";
+    rcl_interfaces::msg::Parameter compliant_mode_param;
+    compliant_mode_param.name = compliant_modes_tag + suffix_tag;
+    compliant_mode_param.value.type = rcl_interfaces::msg::ParameterType::PARAMETER_BOOL;
+    compliant_mode_param.value.bool_value = (mode == yarp::dev::InteractionModeEnum::VOCAB_IM_COMPLIANT);
+    auto results = m_node->setParameters({ compliant_mode_param });
+    if (results.size() != 1)
+    {
+        yCError(CB) << errorPrefix << "Error while setting interaction mode for joint" << j << ".";
+        return false;
+    }
+    if (!results[0].successful)
+    {
+        yCError(CB) << errorPrefix << "Error while setting interaction mode for joint" << j << ":" << results[0].reason;
+        return false;
+    }
+    return true;
 }
 
 bool yarp::dev::IsaacSimControlBoardNWCROS2::setInteractionModes(int n_joints, int* joints, yarp::dev::InteractionModeEnum* modes)
 {
-    return false;
+    std::lock_guard<std::mutex> lock(m_mutex);
+    std::string errorPrefix = "[setInteractionModes] ";
+    std::vector<rcl_interfaces::msg::Parameter> compliant_mode_params;
+    for (int i = 0; i < n_joints; i++)
+    {
+        int j = joints[i];
+        yarp::dev::InteractionModeEnum mode = modes[i];
+        std::string suffix_tag = "[" + std::to_string(j) + "]";
+        rcl_interfaces::msg::Parameter compliant_mode_param;
+        compliant_mode_param.name = compliant_modes_tag + suffix_tag;
+        compliant_mode_param.value.type = rcl_interfaces::msg::ParameterType::PARAMETER_BOOL;
+        compliant_mode_param.value.bool_value = (mode == yarp::dev::InteractionModeEnum::VOCAB_IM_COMPLIANT);
+        compliant_mode_params.push_back(compliant_mode_param);
+    }
+    auto results = m_node->setParameters(compliant_mode_params);
+    if (results.size() != static_cast<size_t>(n_joints))
+    {
+        yCError(CB) << errorPrefix << "Error while setting interaction modes.";
+        return false;
+    }
+    for (int i = 0; i < n_joints; i++)
+    {
+        if (!results[i].successful)
+        {
+            yCError(CB) << errorPrefix << "Error while setting interaction mode for joint" << joints[i] << ":" << results[i].reason;
+            return false;
+        }
+    }
+    return true;
 }
 
 bool yarp::dev::IsaacSimControlBoardNWCROS2::setInteractionModes(yarp::dev::InteractionModeEnum* modes)
 {
-    return false;
+    std::lock_guard<std::mutex> lock(m_mutex);
+    std::string errorPrefix = "[setInteractionModes] ";
+    if (modes == nullptr)
+    {
+        yCError(CB) << errorPrefix << "modes is a null pointer.";
+        return false;
+    }
+    if (!m_jointState.valid.load())
+    {
+        yCError(CB) << errorPrefix << "No valid data received yet.";
+        return false;
+    }
+    size_t n_joints = 0;
+    {
+        std::lock_guard<std::mutex> lock_measurements(m_jointState.mutex);
+        n_joints = m_jointState.name.size();
+    }
+    rcl_interfaces::msg::Parameter compliant_mode_param;
+    compliant_mode_param.name = compliant_modes_tag;
+    compliant_mode_param.value.type = rcl_interfaces::msg::ParameterType::PARAMETER_BOOL_ARRAY;
+    compliant_mode_param.value.bool_array_value.resize(n_joints);
+    for (size_t i = 0; i < n_joints; i++)
+    {
+        compliant_mode_param.value.bool_array_value[i] = (modes[i] == yarp::dev::InteractionModeEnum::VOCAB_IM_COMPLIANT);
+    }
+    auto results = m_node->setParameters({ compliant_mode_param });
+    if (results.size() != 1)
+    {
+        yCError(CB) << errorPrefix << "Error while setting interaction modes.";
+        return false;
+    }
+    if (!results[0].successful)
+    {
+        yCError(CB) << errorPrefix << "Error while setting interaction modes:" << results[0].reason;
+        return false;
+    }
+    return true;
 }
 
 bool yarp::dev::IsaacSimControlBoardNWCROS2::setRefDutyCycle(int m, double ref)
@@ -3294,7 +3467,7 @@ void yarp::dev::IsaacSimControlBoardNWCROS2::JointsState::convert_to_vectors(con
         vel *= rad2deg;
     }
     effort = js->effort;
-    timestamp = js->header.stamp.sec + js->header.stamp.nanosec * 1e-9;
+    timestamp.update(js->header.stamp.sec + js->header.stamp.nanosec * 1e-9);
     valid = true;
 }
 yarp::dev::IsaacSimControlBoardNWCROS2::CBNode::CBNode(const std::string& node_name,
