@@ -40,7 +40,7 @@ static const std::string is_motion_done_tag = "is_motion_done";
 static const std::string position_pid_enabled_tag = "position_pid_enabled";
 static const std::string position_pid_to_reset_tag = "position_pid_to_reset";
 static const std::string position_pid_to_stop_tag = "position_pid_to_stop";
-// These below are not used since the pid type does not consider the direct mode
+// TODO: These below are not used since the pid type does not consider the direct mode
 static const std::string position_direct_pid_references_tag = "position_direct_pid_references";
 static const std::string position_direct_pid_errors_tag = "position_direct_pid_errors";
 static const std::string position_direct_pid_outputs_tag = "position_direct_pid_outputs";
@@ -377,13 +377,13 @@ bool yarp::dev::IsaacSimControlBoardNWCROS2::setPids(const yarp::dev::PidControl
 
 bool yarp::dev::IsaacSimControlBoardNWCROS2::setPidReference(const yarp::dev::PidControlTypeEnum& pidtype, int j, double ref)
 {
-    // todo
+    // TODO
     return false;
 }
 
 bool yarp::dev::IsaacSimControlBoardNWCROS2::setPidReferences(const yarp::dev::PidControlTypeEnum& pidtype, const double* refs)
 {
-    // todo
+    // TODO
     return false;
 }
 
@@ -1398,151 +1398,371 @@ bool yarp::dev::IsaacSimControlBoardNWCROS2::getAxes(int* ax)
 
 bool yarp::dev::IsaacSimControlBoardNWCROS2::positionMove(int j, double ref)
 {
+    // TODO
     return false;
 }
 
 bool yarp::dev::IsaacSimControlBoardNWCROS2::positionMove(const double* refs)
 {
+    // TODO
     return false;
 }
 
 bool yarp::dev::IsaacSimControlBoardNWCROS2::positionMove(const int n_joints, const int* joints, const double* refs)
 {
+    // TODO
     return false;
 }
 
 bool yarp::dev::IsaacSimControlBoardNWCROS2::getTargetPosition(const int joint, double* ref)
 {
+    // TODO
     return false;
 }
 
 bool yarp::dev::IsaacSimControlBoardNWCROS2::getTargetPositions(double* refs)
 {
+    // TODO
     return false;
 }
 
 bool yarp::dev::IsaacSimControlBoardNWCROS2::getTargetPositions(const int n_joint, const int* joints, double* refs)
 {
+    // TODO
     return false;
 }
 
 bool yarp::dev::IsaacSimControlBoardNWCROS2::relativeMove(int j, double delta)
 {
+    // TODO
     return false;
 }
 
 bool yarp::dev::IsaacSimControlBoardNWCROS2::relativeMove(const double* deltas)
 {
+    // TODO
     return false;
 }
 
 bool yarp::dev::IsaacSimControlBoardNWCROS2::relativeMove(const int n_joints, const int* joints, const double* deltas)
 {
+    // TODO
     return false;
 }
 
 bool yarp::dev::IsaacSimControlBoardNWCROS2::checkMotionDone(int j, bool* flag)
 {
-    return false;
+    std::lock_guard<std::mutex> lock(m_mutex);
+    std::string errorPrefix = "[checkMotionDone] ";
+
+    std::string suffix_tag = "[" + std::to_string(j) + "]";
+
+    auto results = m_node->getParameters({ is_motion_done_tag + suffix_tag });
+
+    if (results.size() != 1)
+    {
+        yCError(CB) << errorPrefix << "Error while getting motion done state.";
+        return false;
+    }
+    if (results[0].type == rcl_interfaces::msg::ParameterType::PARAMETER_NOT_SET)
+    {
+        yCError(CB) << errorPrefix << "Error while retrieving motion done state.";
+        return false;
+    }
+    if (results[0].type != rcl_interfaces::msg::ParameterType::PARAMETER_BOOL)
+    {
+        yCError(CB) << errorPrefix << "Error while getting motion done state. Wrong parameter type.";
+        return false;
+    }
+
+    *flag = results[0].bool_value;
+
+    return true;
 }
 
 bool yarp::dev::IsaacSimControlBoardNWCROS2::checkMotionDone(bool* flag)
 {
-    return false;
+    std::lock_guard<std::mutex> lock(m_mutex);
+    std::string errorPrefix = "[checkMotionDone] ";
+    auto results = m_node->getParameters({ is_motion_done_tag });
+
+    if (results.size() != 1)
+    {
+        yCError(CB) << errorPrefix << "Error while getting motion done state.";
+        return false;
+    }
+    if (results[0].type == rcl_interfaces::msg::ParameterType::PARAMETER_NOT_SET)
+    {
+        yCError(CB) << errorPrefix << "Error while retrieving motion done state.";
+        return false;
+    }
+    if (results[0].type != rcl_interfaces::msg::ParameterType::PARAMETER_BOOL_ARRAY)
+    {
+        yCError(CB) << errorPrefix << "Error while getting motion done state. Wrong parameter type.";
+        return false;
+    }
+
+    // Check if any of the joints is still moving
+    *flag = true;
+    for (const auto& val : results[0].bool_array_value)
+    {
+        if (!val)
+        {
+            *flag = false;
+            break;
+        }
+    }
+
+    return true;
 }
 
 bool yarp::dev::IsaacSimControlBoardNWCROS2::checkMotionDone(const int n_joints, const int* joints, bool* flags)
 {
-    return false;
+    std::lock_guard<std::mutex> lock(m_mutex);
+    std::string errorPrefix = "[checkMotionDone] ";
+
+    auto results = m_node->getParameters({ is_motion_done_tag });
+
+    if (results.size() != 1)
+    {
+        yCError(CB) << errorPrefix << "Error while getting motion done state.";
+        return false;
+    }
+    if (results[0].type == rcl_interfaces::msg::ParameterType::PARAMETER_NOT_SET)
+    {
+        yCError(CB) << errorPrefix << "Error while retrieving motion done state.";
+        return false;
+    }
+    if (results[0].type != rcl_interfaces::msg::ParameterType::PARAMETER_BOOL_ARRAY)
+    {
+        yCError(CB) << errorPrefix << "Error while getting motion done state. Wrong parameter type.";
+        return false;
+    }
+    const auto& motion_done_array = results[0].bool_array_value;
+
+    for (int i = 0; i < n_joints; i++)
+    {
+        int j = joints[i];
+        if (j < 0 || j >= static_cast<int>(motion_done_array.size()))
+        {
+            yCError(CB) << errorPrefix << "Index" << j << "out of range. Valid range is [0," << motion_done_array.size() - 1 << "]";
+            return false;
+        }
+        flags[i] = motion_done_array[j];
+    }
+
+    return true;
 }
 
 bool yarp::dev::IsaacSimControlBoardNWCROS2::setRefSpeed(int j, double sp)
 {
+    // TODO
     return false;
 }
 
 bool yarp::dev::IsaacSimControlBoardNWCROS2::setRefSpeeds(const double* spds)
 {
+    // TODO
     return false;
 }
 
 bool yarp::dev::IsaacSimControlBoardNWCROS2::setRefSpeeds(const int n_joints, const int* joints, const double* spds)
 {
+    // TODO
     return false;
 }
 
 bool yarp::dev::IsaacSimControlBoardNWCROS2::setRefAcceleration(int j, double acc)
 {
+    yCError(CB) << "[setRefAcceleration] It is not possible to set reference accelerations in Isaac sim.";
     return false;
 }
 
 bool yarp::dev::IsaacSimControlBoardNWCROS2::setRefAccelerations(const double* accs)
 {
+    yCError(CB) << "[setRefAccelerations] It is not possible to set reference accelerations in Isaac sim.";
     return false;
 }
 
 bool yarp::dev::IsaacSimControlBoardNWCROS2::setRefAccelerations(const int n_joints, const int* joints, const double* accs)
 {
+    yCError(CB) << "[setRefAccelerations] It is not possible to set reference accelerations in Isaac sim.";
     return false;
 }
 
 bool yarp::dev::IsaacSimControlBoardNWCROS2::getRefSpeed(int j, double* ref)
 {
+    // TODO
     return false;
 }
 
 bool yarp::dev::IsaacSimControlBoardNWCROS2::getRefSpeeds(double* spds)
 {
+    // TODO
     return false;
 }
 
 bool yarp::dev::IsaacSimControlBoardNWCROS2::getRefSpeeds(const int n_joints, const int* joints, double* spds)
 {
+    // TODO
     return false;
 }
 
 bool yarp::dev::IsaacSimControlBoardNWCROS2::getRefAcceleration(int j, double* acc)
 {
+    yCError(CB) << "[getRefAcceleration] It is not possible to get reference accelerations in Isaac sim.";
     return false;
 }
 
 bool yarp::dev::IsaacSimControlBoardNWCROS2::getRefAccelerations(double* accs)
 {
+    yCError(CB) << "[getRefAccelerations] It is not possible to get reference accelerations in Isaac sim.";
     return false;
 }
 
 bool yarp::dev::IsaacSimControlBoardNWCROS2::getRefAccelerations(const int n_joints, const int* joints, double* accs)
 {
+    yCError(CB) << "[getRefAccelerations] It is not possible to get reference accelerations in Isaac sim.";
     return false;
 }
 
 bool yarp::dev::IsaacSimControlBoardNWCROS2::stop(int j)
 {
-    return false;
+    std::lock_guard<std::mutex> lock(m_mutex);
+    std::string errorPrefix = "[stop] ";
+    std::string suffix_tag = "[" + std::to_string(j) + "]";
+
+    rcl_interfaces::msg::Parameter stop_param;
+    stop_param.name = position_pid_to_stop_tag + suffix_tag;
+    stop_param.value.type = rcl_interfaces::msg::ParameterType::PARAMETER_BOOL;
+    stop_param.value.bool_value = true;
+    auto results = m_node->setParameters({ stop_param });
+
+    if (results.size() != 1)
+    {
+        yCError(CB) << errorPrefix << "Error while stopping the joint" << j << ".";
+        return false;
+    }
+    if (!results[0].successful)
+    {
+        yCError(CB) << errorPrefix << "Error while stopping the joint" << j << ":" << results[0].reason;
+        return false;
+    }
+    return true;
 }
 
 bool yarp::dev::IsaacSimControlBoardNWCROS2::stop()
 {
-    return false;
+    std::lock_guard<std::mutex> lock(m_mutex);
+    std::string errorPrefix = "[stop] ";
+
+    if (!m_jointState.valid.load())
+    {
+        yCError(CB) << errorPrefix << "No valid data received yet.";
+        return false;
+    }
+    size_t n_joints = 0;
+    {
+        std::lock_guard<std::mutex> lock_measurements(m_jointState.mutex);
+        n_joints = m_jointState.position.size();
+    }
+
+    rcl_interfaces::msg::Parameter stop_param;
+    stop_param.name = position_pid_to_stop_tag;
+    stop_param.value.type = rcl_interfaces::msg::ParameterType::PARAMETER_BOOL_ARRAY;
+    stop_param.value.bool_array_value = std::vector<bool>(n_joints, true);
+    auto results = m_node->setParameters({ stop_param });
+    if (results.size() != 1)
+    {
+        yCError(CB) << errorPrefix << "Error while stopping all the joints.";
+        return false;
+    }
+    if (!results[0].successful)
+    {
+        yCError(CB) << errorPrefix << "Error while stopping all the joints:" << results[0].reason;
+        return false;
+    }
+    return true;
+
 }
 
 bool yarp::dev::IsaacSimControlBoardNWCROS2::stop(const int n_joints, const int* joints)
 {
-    return false;
+    std::lock_guard<std::mutex> lock(m_mutex);
+    std::string errorPrefix = "[stop] ";
+    if (!m_jointState.valid.load())
+    {
+        yCError(CB) << errorPrefix << "No valid data received yet.";
+        return false;
+    }
+    size_t total_joints = 0;
+    {
+        std::lock_guard<std::mutex> lock_measurements(m_jointState.mutex);
+        total_joints = m_jointState.position.size();
+    }
+    rcl_interfaces::msg::Parameter stop_param;
+    stop_param.name = position_pid_to_stop_tag;
+    stop_param.value.type = rcl_interfaces::msg::ParameterType::PARAMETER_BOOL_ARRAY;
+    stop_param.value.bool_array_value = std::vector<bool>(total_joints, false);
+    for (int i = 0; i < n_joints; i++)
+    {
+        int j = joints[i];
+        if (j < 0 || j >= static_cast<int>(total_joints))
+        {
+            yCError(CB) << errorPrefix << "Index" << j << "out of range. Valid range is [0," << total_joints - 1 << "]";
+            return false;
+        }
+        stop_param.value.bool_array_value[j] = true;
+    }
+    auto results = m_node->setParameters({ stop_param });
+    if (results.size() != 1)
+    {
+        yCError(CB) << errorPrefix << "Error while stopping the joints.";
+        return false;
+    }
+    if (!results[0].successful)
+    {
+        yCError(CB) << errorPrefix << "Error while stopping the joints:" << results[0].reason;
+        return false;
+    }
+    return true;
 }
 
 bool yarp::dev::IsaacSimControlBoardNWCROS2::getLastJointFault(int j, int& fault, std::string& message)
 {
-    return false;
+    std::lock_guard<std::mutex> lock(m_mutex);
+    std::string errorPrefix = "[getLastJointFault] ";
+    std::string suffix_tag = "[" + std::to_string(j) + "]";
+    auto results = m_node->getParameters({ hf_messages_tag + suffix_tag });
+    if (results.size() != 1)
+    {
+        yCError(CB) << errorPrefix << "Error while getting last joint fault.";
+        return false;
+    }
+    if (results[0].type == rcl_interfaces::msg::ParameterType::PARAMETER_NOT_SET)
+    {
+        yCError(CB) << errorPrefix << "Error while retrieving last joint fault.";
+        return false;
+    }
+    if (results[0].type != rcl_interfaces::msg::ParameterType::PARAMETER_STRING)
+    {
+        yCError(CB) << errorPrefix << "Error while getting last joint fault. Wrong parameter type.";
+        return false;
+    }
+    fault = -1;
+    message = results[0].string_value;
+    return true;
 }
 
 bool yarp::dev::IsaacSimControlBoardNWCROS2::velocityMove(int j, double v)
 {
+    // TODO
     return false;
 }
 
 bool yarp::dev::IsaacSimControlBoardNWCROS2::velocityMove(const double* v)
 {
+    // TODO
     return false;
 }
 
@@ -1886,12 +2106,50 @@ bool yarp::dev::IsaacSimControlBoardNWCROS2::getAmpStatus(int j, int* v)
 
 bool yarp::dev::IsaacSimControlBoardNWCROS2::setMaxCurrent(int j, double v)
 {
-    return false;
+    std::lock_guard<std::mutex> lock(m_mutex);
+    std::string errorPrefix = "[setMaxCurrent] ";
+    std::string suffix_tag = "[" + std::to_string(j) + "]";
+    rcl_interfaces::msg::Parameter max_current_param;
+    max_current_param.name = motor_max_currents_tag + suffix_tag;
+    max_current_param.value.type = rcl_interfaces::msg::ParameterType::PARAMETER_DOUBLE;
+    max_current_param.value.double_value = v;
+    auto results = m_node->setParameters({ max_current_param });
+    if (results.size() != 1)
+    {
+        yCError(CB) << errorPrefix << "Error while setting max current for joint" << j << ".";
+        return false;
+    }
+    if (!results[0].successful)
+    {
+        yCError(CB) << errorPrefix << "Error while setting max current for joint" << j << ":" << results[0].reason;
+        return false;
+    }
+    return true;
 }
 
 bool yarp::dev::IsaacSimControlBoardNWCROS2::getMaxCurrent(int j, double* v)
 {
-    return false;
+    std::lock_guard<std::mutex> lock(m_mutex);
+    std::string errorPrefix = "[getMaxCurrent] ";
+    std::string suffix_tag = "[" + std::to_string(j) + "]";
+    auto results = m_node->getParameters({ motor_max_currents_tag + suffix_tag });
+    if (results.size() != 1)
+    {
+        yCError(CB) << errorPrefix << "Error while getting max current for joint" << j << ".";
+        return false;
+    }
+    if (results[0].type == rcl_interfaces::msg::ParameterType::PARAMETER_NOT_SET)
+    {
+        yCError(CB) << errorPrefix << "Error while retrieving max current for joint" << j << ".";
+        return false;
+    }
+    if (results[0].type != rcl_interfaces::msg::ParameterType::PARAMETER_DOUBLE)
+    {
+        yCError(CB) << errorPrefix << "Error while getting max current for joint" << j << ". Wrong parameter type.";
+        return false;
+    }
+    *v = results[0].double_value;
+    return true;
 }
 
 bool yarp::dev::IsaacSimControlBoardNWCROS2::getNominalCurrent(int m, double* val)
@@ -1944,41 +2202,253 @@ bool yarp::dev::IsaacSimControlBoardNWCROS2::getPowerSupplyVoltage(int m, double
 
 bool yarp::dev::IsaacSimControlBoardNWCROS2::setLimits(int j, double min, double max)
 {
-    return false;
+    std::lock_guard<std::mutex> lock(m_mutex);
+    std::string errorPrefix = "[setLimits] ";
+    std::string suffix_tag = "[" + std::to_string(j) + "]";
+    rcl_interfaces::msg::Parameter min_param;
+    min_param.name = min_positions_tag + suffix_tag;
+    min_param.value.type = rcl_interfaces::msg::ParameterType::PARAMETER_DOUBLE;
+    min_param.value.double_value = min;
+    rcl_interfaces::msg::Parameter max_param;
+    max_param.name = max_positions_tag + suffix_tag;
+    max_param.value.type = rcl_interfaces::msg::ParameterType::PARAMETER_DOUBLE;
+    max_param.value.double_value = max;
+    auto results = m_node->setParameters({ min_param, max_param });
+    if (results.size() != 2)
+    {
+        yCError(CB) << errorPrefix << "Error while setting limits for joint" << j << ".";
+        return false;
+    }
+    if (!results[0].successful)
+    {
+        yCError(CB) << errorPrefix << "Error while setting min limit for joint" << j << ":" << results[0].reason;
+        return false;
+    }
+    if (!results[1].successful)
+    {
+        yCError(CB) << errorPrefix << "Error while setting max limit for joint" << j << ":" << results[1].reason;
+        return false;
+    }
+    return true;
 }
 
 bool yarp::dev::IsaacSimControlBoardNWCROS2::getLimits(int j, double* min, double* max)
 {
-    return false;
+    std::lock_guard<std::mutex> lock(m_mutex);
+    std::string errorPrefix = "[getLimits] ";
+    std::string suffix_tag = "[" + std::to_string(j) + "]";
+    auto results = m_node->getParameters({ min_positions_tag + suffix_tag, max_positions_tag + suffix_tag });
+    if (results.size() != 2)
+    {
+        yCError(CB) << errorPrefix << "Error while getting limits for joint" << j << ".";
+        return false;
+    }
+    if (results[0].type == rcl_interfaces::msg::ParameterType::PARAMETER_NOT_SET ||
+        results[1].type == rcl_interfaces::msg::ParameterType::PARAMETER_NOT_SET)
+    {
+        yCError(CB) << errorPrefix << "Error while retrieving limits for joint" << j << ".";
+        return false;
+    }
+    if (results[0].type != rcl_interfaces::msg::ParameterType::PARAMETER_DOUBLE ||
+        results[1].type != rcl_interfaces::msg::ParameterType::PARAMETER_DOUBLE)
+    {
+        yCError(CB) << errorPrefix << "Error while getting limits for joint" << j << ". Wrong parameter type.";
+        return false;
+    }
+    *min = results[0].double_value;
+    *max = results[1].double_value;
+    return true;
 }
 
 bool yarp::dev::IsaacSimControlBoardNWCROS2::setVelLimits(int j, double min, double max)
 {
-    return false;
+    std::lock_guard<std::mutex> lock(m_mutex);
+    std::string errorPrefix = "[setVelLimits] ";
+    std::string suffix_tag = "[" + std::to_string(j) + "]";
+    rcl_interfaces::msg::Parameter max_param;
+    max_param.name = max_velocities_tag + suffix_tag;
+    max_param.value.type = rcl_interfaces::msg::ParameterType::PARAMETER_DOUBLE;
+
+    if (min != max)
+    {
+        yCWarning(CB) << errorPrefix << "Isaac sim supports only symmetric velocity limits. "
+                                        "The minimum absolute value of the two will be considered.";
+    }
+
+    max_param.value.double_value = std::min(std::abs(min), std::abs(max));
+
+    auto results = m_node->setParameters({ max_param });
+    if (results.size() != 1)
+    {
+        yCError(CB) << errorPrefix << "Error while setting velocity limits for joint" << j << ".";
+        return false;
+    }
+    if (!results[0].successful)
+    {
+        yCError(CB) << errorPrefix << "Error while setting velocity limits for joint" << j << ":" << results[0].reason;
+        return false;
+    }
+    return true;
+
 }
 
 bool yarp::dev::IsaacSimControlBoardNWCROS2::getVelLimits(int j, double* min, double* max)
 {
-    return false;
+    std::lock_guard<std::mutex> lock(m_mutex);
+    std::string errorPrefix = "[getVelLimits] ";
+    std::string suffix_tag = "[" + std::to_string(j) + "]";
+    auto results = m_node->getParameters({ max_velocities_tag + suffix_tag });
+    if (results.size() != 1)
+    {
+        yCError(CB) << errorPrefix << "Error while getting velocity limits for joint" << j << ".";
+        return false;
+    }
+    if (results[0].type == rcl_interfaces::msg::ParameterType::PARAMETER_NOT_SET)
+    {
+        yCError(CB) << errorPrefix << "Error while retrieving velocity limits for joint" << j << ".";
+        return false;
+    }
+    if (results[0].type != rcl_interfaces::msg::ParameterType::PARAMETER_DOUBLE)
+    {
+        yCError(CB) << errorPrefix << "Error while getting velocity limits for joint" << j << ". Wrong parameter type.";
+        return false;
+    }
+    *max = results[0].double_value;
+    *min = -(*max);
+    return true;
 }
 
 bool yarp::dev::IsaacSimControlBoardNWCROS2::getRemoteVariable(std::string key, yarp::os::Bottle& val)
 {
-    return false;
+    std::lock_guard<std::mutex> lock(m_mutex);
+    std::string errorPrefix = "[getRemoteVariable] ";
+    auto results = m_node->getParameters({ key });
+    if (results.size() != 1)
+    {
+        yCError(CB) << errorPrefix << "Error while getting remote variable" << key << ".";
+        return false;
+    }
+    if (results[0].type == rcl_interfaces::msg::ParameterType::PARAMETER_NOT_SET)
+    {
+        yCError(CB) << errorPrefix << "Error while retrieving remote variable" << key << ".";
+        return false;
+    }
+    switch (results[0].type)
+    {
+    case rcl_interfaces::msg::ParameterType::PARAMETER_BOOL:
+        val.addInt8(results[0].bool_value);
+        break;
+    case rcl_interfaces::msg::ParameterType::PARAMETER_INTEGER:
+        val.addInt32(static_cast<int32_t>(results[0].integer_value));
+        break;
+    case rcl_interfaces::msg::ParameterType::PARAMETER_DOUBLE:
+        val.addFloat64(results[0].double_value);
+        break;
+    case rcl_interfaces::msg::ParameterType::PARAMETER_STRING:
+        val.addString(results[0].string_value);
+        break;
+    case rcl_interfaces::msg::ParameterType::PARAMETER_BOOL_ARRAY:
+        for (auto v : results[0].bool_array_value)
+            val.addInt8(v);
+        break;
+    case rcl_interfaces::msg::ParameterType::PARAMETER_INTEGER_ARRAY:
+        for (auto v : results[0].integer_array_value)
+            val.addInt32(static_cast<int32_t>(v));
+        break;
+    case rcl_interfaces::msg::ParameterType::PARAMETER_DOUBLE_ARRAY:
+        for (auto v : results[0].double_array_value)
+            val.addFloat64(v);
+        break;
+    case rcl_interfaces::msg::ParameterType::PARAMETER_STRING_ARRAY:
+        for (auto v : results[0].string_array_value)
+            val.addString(v);
+        break;
+    default:
+        yCError(CB) << errorPrefix << "Error while getting remote variable" << key << ". Unsupported parameter type.";
+        return false;
+    }
+
+    return true;
 }
 
 bool yarp::dev::IsaacSimControlBoardNWCROS2::setRemoteVariable(std::string key, const yarp::os::Bottle& val)
 {
+    yCError(CB) << "[setRemoteVariable] It is not possible to set remote variables in Isaac sim.";
     return false;
 }
 
 bool yarp::dev::IsaacSimControlBoardNWCROS2::getRemoteVariablesList(yarp::os::Bottle* listOfKeys)
 {
-    return false;
+    std::lock_guard<std::mutex> lock(m_mutex);
+    std::string errorPrefix = "[getRemoteVariablesList] ";
+
+    if (listOfKeys == nullptr)
+    {
+        yCError(CB) << errorPrefix << "listOfKeys is a null pointer.";
+        return false;
+    }
+
+    listOfKeys->addString(joint_names_tag);
+    listOfKeys->addString(max_positions_tag);
+    listOfKeys->addString(min_positions_tag);
+    listOfKeys->addString(max_velocities_tag);
+    listOfKeys->addString(max_efforts_tag);
+    listOfKeys->addString(control_modes_tag);
+    listOfKeys->addString(previous_control_modes_tag);
+    listOfKeys->addString(compliant_modes_tag);
+    listOfKeys->addString(hf_messages_tag);
+    listOfKeys->addString(position_p_gains_tag);
+    listOfKeys->addString(position_i_gains_tag);
+    listOfKeys->addString(position_d_gains_tag);
+    listOfKeys->addString(position_max_integral_tag);
+    listOfKeys->addString(position_max_output_tag);
+    listOfKeys->addString(position_max_error_tag);
+    listOfKeys->addString(home_positions_tag);
+    listOfKeys->addString(compliant_stiffness_tag);
+    listOfKeys->addString(compliant_damping_tag);
+    listOfKeys->addString(velocity_p_gains_tag);
+    listOfKeys->addString(velocity_i_gains_tag);
+    listOfKeys->addString(velocity_d_gains_tag);
+    listOfKeys->addString(velocity_max_integral_tag);
+    listOfKeys->addString(velocity_max_output_tag);
+    listOfKeys->addString(velocity_max_error_tag);
+    listOfKeys->addString(position_pid_references_tag);
+    listOfKeys->addString(position_pid_errors_tag);
+    listOfKeys->addString(position_pid_outputs_tag);
+    listOfKeys->addString(is_motion_done_tag);
+    listOfKeys->addString(position_pid_enabled_tag);
+    listOfKeys->addString(position_pid_to_reset_tag);
+    listOfKeys->addString(position_pid_to_stop_tag);
+    listOfKeys->addString(position_direct_pid_references_tag);
+    listOfKeys->addString(position_direct_pid_errors_tag);
+    listOfKeys->addString(position_direct_pid_outputs_tag);
+    listOfKeys->addString(position_direct_pid_enabled_tag);
+    listOfKeys->addString(position_direct_pid_to_reset_tag);
+    listOfKeys->addString(velocity_pid_references_tag);
+    listOfKeys->addString(velocity_pid_errors_tag);
+    listOfKeys->addString(velocity_pid_outputs_tag);
+    listOfKeys->addString(velocity_pid_enabled_tag);
+    listOfKeys->addString(velocity_pid_to_reset_tag);
+    listOfKeys->addString(torque_pid_references_tag);
+    listOfKeys->addString(torque_pid_errors_tag);
+    listOfKeys->addString(torque_pid_outputs_tag);
+    listOfKeys->addString(torque_pid_enabled_tag);
+    listOfKeys->addString(current_pid_references_tag);
+    listOfKeys->addString(current_pid_errors_tag);
+    listOfKeys->addString(current_pid_outputs_tag);
+    listOfKeys->addString(current_pid_enabled_tag);
+    listOfKeys->addString(gearbox_ratios_tag);
+    listOfKeys->addString(motor_torque_constants_tag);
+    listOfKeys->addString(motor_current_noise_variance_tag);
+    listOfKeys->addString(motor_spring_stiffness_tag);
+    listOfKeys->addString(motor_max_currents_tag);
+
+    return true;
 }
 
 bool yarp::dev::IsaacSimControlBoardNWCROS2::isCalibratorDevicePresent(bool* isCalib)
 {
+    *isCalib = false;
     return false;
 }
 
@@ -1989,72 +2459,94 @@ yarp::dev::IRemoteCalibrator* yarp::dev::IsaacSimControlBoardNWCROS2::getCalibra
 
 bool yarp::dev::IsaacSimControlBoardNWCROS2::calibrateSingleJoint(int j)
 {
+    yCError(CB) << "[calibrateSingleJoint] It is not possible to calibrate a joint in Isaac sim.";
     return false;
 }
 
 bool yarp::dev::IsaacSimControlBoardNWCROS2::calibrateWholePart()
 {
+    yCError(CB) << "[calibrateWholePart] It is not possible to calibrate joints in Isaac sim.";
     return false;
 }
 
 bool yarp::dev::IsaacSimControlBoardNWCROS2::homingSingleJoint(int j)
 {
+    // TODO
     return false;
 }
 
 bool yarp::dev::IsaacSimControlBoardNWCROS2::homingWholePart()
 {
+    // TODO
     return false;
 }
 
 bool yarp::dev::IsaacSimControlBoardNWCROS2::parkSingleJoint(int j, bool _wait)
 {
+    yCError(CB) << "[parkSingleJoint] It is not possible to park a joint in Isaac sim.";
     return false;
 }
 
 bool yarp::dev::IsaacSimControlBoardNWCROS2::parkWholePart()
 {
+    yCError(CB) << "[parkWholePart] It is not possible to park joints in Isaac sim.";
     return false;
 }
 
 bool yarp::dev::IsaacSimControlBoardNWCROS2::quitCalibrate()
 {
+    yCError(CB) << "[quitCalibrate] It is not possible to quit calibration in Isaac sim.";
     return false;
 }
 
 bool yarp::dev::IsaacSimControlBoardNWCROS2::quitPark()
 {
+    yCError(CB) << "[quitPark] It is not possible to quit park in Isaac sim.";
     return false;
 }
 
 bool yarp::dev::IsaacSimControlBoardNWCROS2::calibrateAxisWithParams(int j, unsigned int ui, double v1, double v2, double v3)
 {
+    yCError(CB) << "[calibrateAxisWithParams] It is not possible to calibrate a joint in Isaac sim.";
     return false;
 }
 
 bool yarp::dev::IsaacSimControlBoardNWCROS2::setCalibrationParameters(int j, const yarp::dev::CalibrationParameters& params)
 {
+    yCError(CB) << "[setCalibrationParameters] It is not possible to set calibration parameters in Isaac sim.";
     return false;
 }
 
 bool yarp::dev::IsaacSimControlBoardNWCROS2::calibrationDone(int j)
 {
+    yCError(CB) << "[calibrationDone] It is not possible to check calibration status in Isaac sim.";
     return false;
 }
 
 bool yarp::dev::IsaacSimControlBoardNWCROS2::abortPark()
 {
+    yCError(CB) << "[abortPark] It is not possible to abort park in Isaac sim.";
     return false;
 }
 
 bool yarp::dev::IsaacSimControlBoardNWCROS2::abortCalibration()
 {
+    yCError(CB) << "[abortCalibration] It is not possible to abort calibration in Isaac sim.";
     return false;
 }
 
 bool yarp::dev::IsaacSimControlBoardNWCROS2::getNumberOfMotors(int* num)
 {
-    return false;
+    std::lock_guard<std::mutex> lock(m_mutex);
+    std::string errorPrefix = "[getNumberOfMotors] ";
+    if (!m_motorState.valid.load())
+    {
+        yCError(CB) << errorPrefix << "No valid data received yet.";
+        return false;
+    }
+    std::lock_guard<std::mutex> lock_measurements(m_motorState.mutex);
+    *num = static_cast<int>(m_motorState.name.size());
+    return true;
 }
 
 bool yarp::dev::IsaacSimControlBoardNWCROS2::getTemperature(int m, double* val)
@@ -2083,12 +2575,50 @@ bool yarp::dev::IsaacSimControlBoardNWCROS2::setTemperatureLimit(int m, const do
 
 bool yarp::dev::IsaacSimControlBoardNWCROS2::getGearboxRatio(int m, double* val)
 {
-    return false;
+    std::lock_guard<std::mutex> lock(m_mutex);
+    std::string errorPrefix = "[getGearboxRatio] ";
+    std::string suffix_tag = "[" + std::to_string(m) + "]";
+    auto results = m_node->getParameters({ gearbox_ratios_tag + suffix_tag });
+    if (results.size() != 1)
+    {
+        yCError(CB) << errorPrefix << "Error while getting gearbox ratio for motor" << m << ".";
+        return false;
+    }
+    if (results[0].type == rcl_interfaces::msg::ParameterType::PARAMETER_NOT_SET)
+    {
+        yCError(CB) << errorPrefix << "Error while retrieving gearbox ratio for motor" << m << ".";
+        return false;
+    }
+    if (results[0].type != rcl_interfaces::msg::ParameterType::PARAMETER_DOUBLE)
+    {
+        yCError(CB) << errorPrefix << "Error while getting gearbox ratio for motor" << m << ". Wrong parameter type.";
+        return false;
+    }
+    *val = results[0].double_value;
+    return true;
 }
 
 bool yarp::dev::IsaacSimControlBoardNWCROS2::setGearboxRatio(int m, const double val)
 {
-    return false;
+    std::lock_guard<std::mutex> lock(m_mutex);
+    std::string errorPrefix = "[setGearboxRatio] ";
+    std::string suffix_tag = "[" + std::to_string(m) + "]";
+    rcl_interfaces::msg::Parameter gearbox_ratio_param;
+    gearbox_ratio_param.name = gearbox_ratios_tag + suffix_tag;
+    gearbox_ratio_param.value.type = rcl_interfaces::msg::ParameterType::PARAMETER_DOUBLE;
+    gearbox_ratio_param.value.double_value = val;
+    auto results = m_node->setParameters({ gearbox_ratio_param });
+    if (results.size() != 1)
+    {
+        yCError(CB) << errorPrefix << "Error while setting gearbox ratio for motor" << m << ".";
+        return false;
+    }
+    if (!results[0].successful)
+    {
+        yCError(CB) << errorPrefix << "Error while setting gearbox ratio for motor" << m << ":" << results[0].reason;
+        return false;
+    }
+    return true;
 }
 
 bool yarp::dev::IsaacSimControlBoardNWCROS2::getAxisName(int j, std::string& name)
@@ -2113,31 +2643,37 @@ bool yarp::dev::IsaacSimControlBoardNWCROS2::getAxisName(int j, std::string& nam
 
 bool yarp::dev::IsaacSimControlBoardNWCROS2::getJointType(int j, yarp::dev::JointTypeEnum& type)
 {
+    // TODO
     return false;
 }
 
 bool yarp::dev::IsaacSimControlBoardNWCROS2::getRefTorques(double* refs)
 {
+    // TODO
     return false;
 }
 
 bool yarp::dev::IsaacSimControlBoardNWCROS2::getRefTorque(int j, double* t)
 {
+    // TODO
     return false;
 }
 
 bool yarp::dev::IsaacSimControlBoardNWCROS2::setRefTorques(const double* t)
 {
+    // TODO
     return false;
 }
 
 bool yarp::dev::IsaacSimControlBoardNWCROS2::setRefTorque(int j, double t)
 {
+    // TODO
     return false;
 }
 
 bool yarp::dev::IsaacSimControlBoardNWCROS2::setRefTorques(const int n_joint, const int* joints, const double* t)
 {
+    // TODO
     return false;
 }
 
