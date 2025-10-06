@@ -10,6 +10,7 @@ YARP_LOG_COMPONENT(CB, "yarp.device.IsaacSimControlBoardNWCROS2")
 constexpr double rad2deg = 180.0 / M_PI;
 
 static const std::string joint_names_tag = "joint_names";
+static const std::string joint_types_tag = "joint_types";
 static const std::string max_positions_tag = "max_positions";
 static const std::string min_positions_tag = "min_positions";
 static const std::string max_velocities_tag = "max_velocities";
@@ -66,35 +67,34 @@ yarp::dev::IsaacSimControlBoardNWCROS2::~IsaacSimControlBoardNWCROS2()
 
 bool yarp::dev::IsaacSimControlBoardNWCROS2::open(yarp::os::Searchable& config)
 {
-    std::lock_guard<std::mutex> lock(m_mutex);
-
-    std::string errorPrefix = "[open] ";
-    if (!m_paramsParser.parseParams(config))
     {
-        yCError(CB) << errorPrefix << "Error while parsing configuration parameters.";
-        return false;
+        std::lock_guard<std::mutex> lock(m_mutex);
+
+        std::string errorPrefix = "[open] ";
+        if (!m_paramsParser.parseParams(config))
+        {
+            yCError(CB) << errorPrefix << "Error while parsing configuration parameters.";
+            return false;
+        }
+
+        if (!rclcpp::ok())
+        {
+            rclcpp::init(0, nullptr);
+        }
+
+        m_node = std::make_shared<CBNode>(m_paramsParser.m_node_name,
+                                          m_paramsParser.m_joint_state_topic_name,
+                                          m_paramsParser.m_motor_state_topic_name,
+                                          m_paramsParser.m_joint_references_topic_name,
+                                          m_paramsParser.m_get_parameters_service_name,
+                                          m_paramsParser.m_set_parameters_service_name,
+                                          m_paramsParser.m_service_request_timeout,
+                                          this);
+        m_executor = std::make_unique<rclcpp::executors::MultiThreadedExecutor>();
+        m_executor->add_node(m_node);
+        m_executorThread = std::thread([this]() { m_executor->spin(); });
     }
-
-    if (!rclcpp::ok())
-    {
-        rclcpp::init(0, nullptr);
-    }
-
-    m_node = std::make_shared<CBNode>(m_paramsParser.m_node_name,
-                                      m_paramsParser.m_joint_state_topic_name,
-                                      m_paramsParser.m_motor_state_topic_name,
-                                      m_paramsParser.m_joint_references_topic_name,
-                                      m_paramsParser.m_get_parameters_service_name,
-                                      m_paramsParser.m_set_parameters_service_name,
-                                      m_paramsParser.m_service_request_timeout,
-                                      this);
-    m_executor = std::make_unique<rclcpp::executors::MultiThreadedExecutor>();
-    m_executor->add_node(m_node);
-    m_executorThread = std::thread([this]() { m_executor->spin(); });
-
-    //TODO check if the services are available and get the control modes and compliant states of the joints
-    // Otherwise it is not clear how to fill the control requests
-    //It is also necessary to know the type of actuator
+    setup();
 
     return true;
 }
@@ -221,20 +221,18 @@ bool yarp::dev::IsaacSimControlBoardNWCROS2::setPid(const yarp::dev::PidControlT
 
 bool yarp::dev::IsaacSimControlBoardNWCROS2::setPids(const yarp::dev::PidControlTypeEnum& pidtype, const yarp::dev::Pid* ps)
 {
-    std::lock_guard<std::mutex> lock(m_mutex);
     std::string errorPrefix = "[setPids] ";
 
-    if (!m_jointState.valid.load())
+    if (!m_ready && !setup())
     {
-        yCError(CB) << errorPrefix << "No valid data received yet.";
+        yCError(CB) << errorPrefix << "Services are not ready.";
         return false;
     }
-    size_t numberOfJoints = 0;
-    {
-        std::lock_guard<std::mutex> lock_measurements(m_jointState.mutex);
-        numberOfJoints = m_jointState.name.size();
 
-    }
+    std::lock_guard<std::mutex> lock(m_mutex);
+
+    size_t numberOfJoints = m_jointNames.size();
+
 
     std::vector<rcl_interfaces::msg::Parameter> params;
 
@@ -450,18 +448,16 @@ bool yarp::dev::IsaacSimControlBoardNWCROS2::setPidErrorLimit(const yarp::dev::P
 
 bool yarp::dev::IsaacSimControlBoardNWCROS2::setPidErrorLimits(const yarp::dev::PidControlTypeEnum& pidtype, const double* limits)
 {
-    std::lock_guard<std::mutex> lock(m_mutex);
     std::string errorPrefix = "[setPidErrorLimits] ";
-    if (!m_jointState.valid.load())
+    if (!m_ready && !setup())
     {
-        yCError(CB) << errorPrefix << "No valid data received yet.";
+        yCError(CB) << errorPrefix << "Services are not ready.";
         return false;
     }
-    size_t numberOfJoints = 0;
-    {
-        std::lock_guard<std::mutex> lock_measurements(m_jointState.mutex);
-        numberOfJoints = m_jointState.name.size();
-    }
+
+    std::lock_guard<std::mutex> lock(m_mutex);
+
+    size_t numberOfJoints = m_jointNames.size();
     std::vector<rcl_interfaces::msg::Parameter> params;
     if (pidtype == yarp::dev::PidControlTypeEnum::VOCAB_PIDTYPE_POSITION)
     {
@@ -1378,17 +1374,16 @@ bool yarp::dev::IsaacSimControlBoardNWCROS2::isPidEnabled(const yarp::dev::PidCo
 
 bool yarp::dev::IsaacSimControlBoardNWCROS2::getAxes(int* ax)
 {
-    std::lock_guard<std::mutex> lock(m_mutex);
     std::string errorPrefix = "[getAxes] ";
-    if (!m_jointState.valid.load())
+    if (!m_ready && !setup())
     {
-        yCError(CB) << errorPrefix << "No valid data received yet.";
+        yCError(CB) << errorPrefix << "Services are not ready.";
         return false;
     }
 
-    std::lock_guard<std::mutex> lock_measurements(m_jointState.mutex);
+    std::lock_guard<std::mutex> lock(m_mutex);
 
-    *ax = static_cast<int>(m_jointState.name.size());
+    *ax = static_cast<int>(m_jointNames.size());
     return true;
 }
 
@@ -1649,24 +1644,22 @@ bool yarp::dev::IsaacSimControlBoardNWCROS2::stop(int j)
 
 bool yarp::dev::IsaacSimControlBoardNWCROS2::stop()
 {
-    std::lock_guard<std::mutex> lock(m_mutex);
     std::string errorPrefix = "[stop] ";
 
-    if (!m_jointState.valid.load())
+    if (!m_ready && !setup())
     {
-        yCError(CB) << errorPrefix << "No valid data received yet.";
+        yCError(CB) << errorPrefix << "Services are not ready.";
         return false;
     }
-    size_t n_joints = 0;
-    {
-        std::lock_guard<std::mutex> lock_measurements(m_jointState.mutex);
-        n_joints = m_jointState.position.size();
-    }
+
+    std::lock_guard<std::mutex> lock(m_mutex);
+
+    size_t numberOfJoints = m_jointNames.size();
 
     rcl_interfaces::msg::Parameter stop_param;
     stop_param.name = position_pid_to_stop_tag;
     stop_param.value.type = rcl_interfaces::msg::ParameterType::PARAMETER_BOOL_ARRAY;
-    stop_param.value.bool_array_value = std::vector<bool>(n_joints, true);
+    stop_param.value.bool_array_value = std::vector<bool>(numberOfJoints, true);
     auto results = m_node->setParameters({ stop_param });
     if (results.size() != 1)
     {
@@ -1684,28 +1677,26 @@ bool yarp::dev::IsaacSimControlBoardNWCROS2::stop()
 
 bool yarp::dev::IsaacSimControlBoardNWCROS2::stop(const int n_joints, const int* joints)
 {
-    std::lock_guard<std::mutex> lock(m_mutex);
     std::string errorPrefix = "[stop] ";
-    if (!m_jointState.valid.load())
+    if (!m_ready && !setup())
     {
-        yCError(CB) << errorPrefix << "No valid data received yet.";
+        yCError(CB) << errorPrefix << "Services are not ready.";
         return false;
     }
-    size_t total_joints = 0;
-    {
-        std::lock_guard<std::mutex> lock_measurements(m_jointState.mutex);
-        total_joints = m_jointState.position.size();
-    }
+
+    std::lock_guard<std::mutex> lock(m_mutex);
+
+    size_t numberOfJoints = m_jointNames.size();
     rcl_interfaces::msg::Parameter stop_param;
     stop_param.name = position_pid_to_stop_tag;
     stop_param.value.type = rcl_interfaces::msg::ParameterType::PARAMETER_BOOL_ARRAY;
-    stop_param.value.bool_array_value = std::vector<bool>(total_joints, false);
+    stop_param.value.bool_array_value = std::vector<bool>(numberOfJoints, false);
     for (int i = 0; i < n_joints; i++)
     {
         int j = joints[i];
-        if (j < 0 || j >= static_cast<int>(total_joints))
+        if (j < 0 || j >= static_cast<int>(numberOfJoints))
         {
-            yCError(CB) << errorPrefix << "Index" << j << "out of range. Valid range is [0," << total_joints - 1 << "]";
+            yCError(CB) << errorPrefix << "Index" << j << "out of range. Valid range is [0," << numberOfJoints - 1 << "]";
             return false;
         }
         stop_param.value.bool_array_value[j] = true;
@@ -2614,29 +2605,55 @@ bool yarp::dev::IsaacSimControlBoardNWCROS2::setGearboxRatio(int m, const double
 
 bool yarp::dev::IsaacSimControlBoardNWCROS2::getAxisName(int j, std::string& name)
 {
-    std::lock_guard<std::mutex> lock(m_mutex);
     std::string errorPrefix = "[getAxisName] ";
-    if (!m_jointState.valid.load())
+    if (!m_ready && !setup())
     {
-        yCError(CB) << errorPrefix << "No valid data received yet.";
+        yCError(CB) << errorPrefix << "Services are not ready.";
         return false;
     }
 
-    std::lock_guard<std::mutex> lock_measurements(m_jointState.mutex);
-    if (j < 0 || j >= static_cast<int>(m_jointState.name.size()))
+    std::lock_guard<std::mutex> lock(m_mutex);
+
+    size_t numberOfJoints = m_jointNames.size();
+    if (j < 0 || j >= static_cast<int>(numberOfJoints))
     {
-        yCError(CB) << errorPrefix << "Index" << j << "out of range. Valid range is [0," << m_jointState.name.size() - 1 << "]";
+        yCError(CB) << errorPrefix << "Index" << j << "out of range. Valid range is [0," << numberOfJoints - 1 << "]";
         return false;
     }
-    name = m_jointState.name[j];
+    name = m_jointNames[j];
     return true;
 }
 
 bool yarp::dev::IsaacSimControlBoardNWCROS2::getJointType(int j, yarp::dev::JointTypeEnum& type)
 {
-    // TODO
-    // This information could be added in the motor state names
-    return false;
+    std::string errorPrefix = "[getJointType] ";
+    if (!m_ready && !setup())
+    {
+        yCError(CB) << errorPrefix << "Services are not ready.";
+        return false;
+    }
+    std::lock_guard<std::mutex> lock(m_mutex);
+    size_t numberOfJoints = m_jointTypes.size();
+    if (j < 0 || j >= static_cast<int>(numberOfJoints))
+    {
+        yCError(CB) << errorPrefix << "Index" << j << "out of range. Valid range is [0," << numberOfJoints - 1 << "]";
+        return false;
+    }
+
+    if (m_jointTypes[j] == 0)
+    {
+        type = yarp::dev::JointTypeEnum::VOCAB_JOINTTYPE_REVOLUTE;
+    }
+    else if (m_jointTypes[j] == 1)
+    {
+        type = yarp::dev::JointTypeEnum::VOCAB_JOINTTYPE_PRISMATIC;
+    }
+    else
+    {
+        yCError(CB) << errorPrefix << "Joint type for joint" << j << "is unknown.";
+        return false;
+    }
+    return true;
 }
 
 bool yarp::dev::IsaacSimControlBoardNWCROS2::getRefTorques(double* refs)
@@ -3030,7 +3047,6 @@ bool yarp::dev::IsaacSimControlBoardNWCROS2::setControlModes(const int n_joints,
 
 bool yarp::dev::IsaacSimControlBoardNWCROS2::setControlModes(int* modes)
 {
-    std::lock_guard<std::mutex> lock(m_mutex);
     std::string errorPrefix = "[setControlModes] ";
 
     if (modes == nullptr)
@@ -3039,23 +3055,21 @@ bool yarp::dev::IsaacSimControlBoardNWCROS2::setControlModes(int* modes)
         return false;
     }
 
-    if (!m_jointState.valid.load())
+    if (!m_ready && !setup())
     {
-        yCError(CB) << errorPrefix << "No valid data received yet.";
+        yCError(CB) << errorPrefix << "Services are not ready.";
         return false;
     }
 
-    size_t n_joints = 0;
-    {
-        std::lock_guard<std::mutex> lock_measurements(m_jointState.mutex);
-        n_joints = m_jointState.name.size();
-    }
+    std::lock_guard<std::mutex> lock(m_mutex);
+
+    size_t numberOfJoints = m_jointNames.size();
 
     rcl_interfaces::msg::Parameter control_mode_param;
     control_mode_param.name = control_modes_tag;
     control_mode_param.value.type = rcl_interfaces::msg::ParameterType::PARAMETER_INTEGER_ARRAY;
-    control_mode_param.value.integer_array_value.resize(n_joints);
-    std::copy(modes, modes + n_joints, control_mode_param.value.integer_array_value.begin());
+    control_mode_param.value.integer_array_value.resize(numberOfJoints);
+    std::copy(modes, modes + numberOfJoints, control_mode_param.value.integer_array_value.begin());
     auto results = m_node->setParameters({ control_mode_param });
     if (results.size() != 1)
     {
@@ -3286,28 +3300,26 @@ bool yarp::dev::IsaacSimControlBoardNWCROS2::setInteractionModes(int n_joints, i
 
 bool yarp::dev::IsaacSimControlBoardNWCROS2::setInteractionModes(yarp::dev::InteractionModeEnum* modes)
 {
-    std::lock_guard<std::mutex> lock(m_mutex);
     std::string errorPrefix = "[setInteractionModes] ";
     if (modes == nullptr)
     {
         yCError(CB) << errorPrefix << "modes is a null pointer.";
         return false;
     }
-    if (!m_jointState.valid.load())
+    if (!m_ready && !setup())
     {
-        yCError(CB) << errorPrefix << "No valid data received yet.";
+        yCError(CB) << errorPrefix << "Services are not ready.";
         return false;
     }
-    size_t n_joints = 0;
-    {
-        std::lock_guard<std::mutex> lock_measurements(m_jointState.mutex);
-        n_joints = m_jointState.name.size();
-    }
+
+    std::lock_guard<std::mutex> lock(m_mutex);
+
+    size_t numberOfJoints = m_jointNames.size();
     rcl_interfaces::msg::Parameter compliant_mode_param;
     compliant_mode_param.name = compliant_modes_tag;
     compliant_mode_param.value.type = rcl_interfaces::msg::ParameterType::PARAMETER_BOOL_ARRAY;
-    compliant_mode_param.value.bool_array_value.resize(n_joints);
-    for (size_t i = 0; i < n_joints; i++)
+    compliant_mode_param.value.bool_array_value.resize(numberOfJoints);
+    for (size_t i = 0; i < numberOfJoints; i++)
     {
         compliant_mode_param.value.bool_array_value[i] = (modes[i] == yarp::dev::InteractionModeEnum::VOCAB_IM_COMPLIANT);
     }
@@ -3485,6 +3497,54 @@ bool yarp::dev::IsaacSimControlBoardNWCROS2::getRefCurrent(int m, double* curr)
     return false;
 }
 
+bool yarp::dev::IsaacSimControlBoardNWCROS2::setup()
+{
+    std::lock_guard<std::mutex> lock(m_mutex);
+
+    std::string errorPrefix = "[setup] ";
+
+    if (!m_node->areServicesAvailable())
+    {
+        m_ready = false;
+        return m_ready;
+    }
+
+    auto result = m_node->getParameters({ joint_names_tag, joint_types_tag });
+    //TODO simplify error handling
+    if (result.size() != 2)
+    {
+        yCError(CB) << errorPrefix << "Error while getting joint names and types.";
+        m_ready = false;
+        return m_ready;
+    }
+    if (result[0].type == rcl_interfaces::msg::ParameterType::PARAMETER_NOT_SET ||
+        result[1].type == rcl_interfaces::msg::ParameterType::PARAMETER_NOT_SET)
+    {
+        yCError(CB) << errorPrefix << "Error while retrieving joint names and types.";
+        m_ready = false;
+        return m_ready;
+    }
+    if (result[0].type != rcl_interfaces::msg::ParameterType::PARAMETER_STRING_ARRAY ||
+        result[1].type != rcl_interfaces::msg::ParameterType::PARAMETER_INTEGER_ARRAY)
+    {
+        yCError(CB) << errorPrefix << "Error while getting joint names and types. Wrong parameter type.";
+        m_ready = false;
+        return m_ready;
+    }
+    if (result[0].string_array_value.size() != result[1].integer_array_value.size())
+    {
+        yCError(CB) << errorPrefix << "Joint names and types have different size.";
+        m_ready = false;
+        return m_ready;
+    }
+    m_jointNames = result[0].string_array_value;
+    m_jointTypes = result[1].integer_array_value;
+
+
+    m_ready = true;
+    return m_ready;
+}
+
 void yarp::dev::IsaacSimControlBoardNWCROS2::updateJointMeasurements(const sensor_msgs::msg::JointState::ConstSharedPtr msg)
 {
     std::lock_guard<std::mutex> lock(m_jointState.mutex);
@@ -3570,4 +3630,9 @@ std::vector<rcl_interfaces::msg::SetParametersResult> yarp::dev::IsaacSimControl
         return std::vector<rcl_interfaces::msg::SetParametersResult>();
     }
     return result.get()->results;
+}
+
+bool yarp::dev::IsaacSimControlBoardNWCROS2::CBNode::areServicesAvailable()
+{
+    return m_getParamClient->service_is_ready() && m_setParamClient->service_is_ready();
 }
