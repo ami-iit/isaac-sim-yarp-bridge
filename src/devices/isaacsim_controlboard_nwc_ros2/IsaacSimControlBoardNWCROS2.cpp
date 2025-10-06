@@ -2632,19 +2632,19 @@ bool yarp::dev::IsaacSimControlBoardNWCROS2::getJointType(int j, yarp::dev::Join
         yCError(CB) << errorPrefix << "Services are not ready.";
         return false;
     }
-    std::lock_guard<std::mutex> lock(m_mutex);
-    size_t numberOfJoints = m_jointTypes.size();
+    std::lock_guard<std::mutex> lock(m_jointState.mutex);
+    size_t numberOfJoints = m_jointState.jointTypes.size();
     if (j < 0 || j >= static_cast<int>(numberOfJoints))
     {
         yCError(CB) << errorPrefix << "Index" << j << "out of range. Valid range is [0," << numberOfJoints - 1 << "]";
         return false;
     }
 
-    if (m_jointTypes[j] == 0)
+    if (m_jointState.jointTypes[j] == 0)
     {
         type = yarp::dev::JointTypeEnum::VOCAB_JOINTTYPE_REVOLUTE;
     }
-    else if (m_jointTypes[j] == 1)
+    else if (m_jointState.jointTypes[j] == 1)
     {
         type = yarp::dev::JointTypeEnum::VOCAB_JOINTTYPE_PRISMATIC;
     }
@@ -3538,8 +3538,10 @@ bool yarp::dev::IsaacSimControlBoardNWCROS2::setup()
         return m_ready;
     }
     m_jointNames = result[0].string_array_value;
-    m_jointTypes = result[1].integer_array_value;
-
+    {
+        std::lock_guard<std::mutex> lock_measurements(m_jointState.mutex);
+        m_jointState.jointTypes = result[1].integer_array_value;
+    }
 
     m_ready = true;
     return m_ready;
@@ -3568,21 +3570,24 @@ void yarp::dev::IsaacSimControlBoardNWCROS2::updateJointMeasurements(const senso
 void yarp::dev::IsaacSimControlBoardNWCROS2::updateMotorMeasurements(const sensor_msgs::msg::JointState::ConstSharedPtr msg)
 {
     std::lock_guard<std::mutex> lock(m_motorState.mutex);
-
+    // Assuming all the motors are revolute
     m_motorState.convert_to_vectors(msg);
 }
 
 void yarp::dev::IsaacSimControlBoardNWCROS2::JointsState::convert_to_vectors(const sensor_msgs::msg::JointState::ConstSharedPtr& js)
 {
-    // TODO: the conversion depends on whether the joint is a revolute or prismatic joint
+    bool useConversions = jointTypes.size() == js->name.size();
     name = js->name;
     position = js->position;
-    for (auto& pos : position) {
-        pos *= rad2deg;
-    }
     velocity = js->velocity;
-    for (auto& vel : velocity) {
-        vel *= rad2deg;
+    if (useConversions) {
+        for (size_t i = 0; i < position.size(); i++) {
+            if (jointTypes[i] == 0) {
+                position[i] *= rad2deg;
+                velocity[i] *= rad2deg;
+            }
+            // Assuming that there is no conversion for linear actuators
+        }
     }
     effort = js->effort;
     timestamp.update(js->header.stamp.sec + js->header.stamp.nanosec * 1e-9);

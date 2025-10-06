@@ -485,6 +485,7 @@ private:
         std::vector<double> position;
         std::vector<double> velocity;
         std::vector<double> effort;
+        std::vector<int64_t> jointTypes;
         yarp::os::Stamp timestamp;
         std::atomic<bool> valid{ false };
         mutable std::mutex mutex;
@@ -498,7 +499,6 @@ private:
     IsaacSimControlBoardNWCROS2_ParamsParser m_paramsParser;
     JointsState m_jointState, m_motorState;
     std::vector<std::string> m_jointNames;
-    std::vector<int64_t> m_jointTypes;
     std::atomic<bool> m_ready{ false };
 };
 #endif
