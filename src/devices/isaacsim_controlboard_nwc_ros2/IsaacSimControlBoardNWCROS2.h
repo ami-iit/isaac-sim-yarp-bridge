@@ -445,6 +445,8 @@ public:
 
 private:
 
+    bool setup();
+
     void updateJointMeasurements(const sensor_msgs::msg::JointState::ConstSharedPtr msg);
 
     void updateMotorMeasurements(const sensor_msgs::msg::JointState::ConstSharedPtr msg);
@@ -465,6 +467,8 @@ private:
         std::vector<rcl_interfaces::msg::ParameterValue> getParameters(const std::vector<std::string>& names);
 
         std::vector<rcl_interfaces::msg::SetParametersResult> setParameters(const std::vector<rcl_interfaces::msg::Parameter>& params);
+
+        bool areServicesAvailable();
 
     private:
         rclcpp::Subscription<sensor_msgs::msg::JointState>::SharedPtr m_jointStateSubscription;
@@ -493,5 +497,8 @@ private:
     std::thread m_executorThread;
     IsaacSimControlBoardNWCROS2_ParamsParser m_paramsParser;
     JointsState m_jointState, m_motorState;
+    std::vector<std::string> m_jointNames;
+    std::vector<int64_t> m_jointTypes;
+    std::atomic<bool> m_ready{ false };
 };
 #endif
