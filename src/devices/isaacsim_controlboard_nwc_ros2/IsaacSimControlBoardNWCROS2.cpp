@@ -40,13 +40,6 @@ static const std::string is_motion_done_tag = "is_motion_done";
 static const std::string position_pid_enabled_tag = "position_pid_enabled";
 static const std::string position_pid_to_reset_tag = "position_pid_to_reset";
 static const std::string position_pid_to_stop_tag = "position_pid_to_stop";
-// TODO: These below are not used since the pid type does not consider the direct mode
-static const std::string position_direct_pid_references_tag = "position_direct_pid_references";
-static const std::string position_direct_pid_errors_tag = "position_direct_pid_errors";
-static const std::string position_direct_pid_outputs_tag = "position_direct_pid_outputs";
-static const std::string position_direct_pid_enabled_tag = "position_direct_pid_enabled";
-static const std::string position_direct_pid_to_reset_tag = "position_direct_pid_to_reset";
-//
 static const std::string velocity_pid_references_tag = "velocity_pid_references";
 static const std::string velocity_pid_errors_tag = "velocity_pid_errors";
 static const std::string velocity_pid_outputs_tag = "velocity_pid_outputs";
@@ -2421,11 +2414,6 @@ bool yarp::dev::IsaacSimControlBoardNWCROS2::getRemoteVariablesList(yarp::os::Bo
     listOfKeys->addString(position_pid_enabled_tag);
     listOfKeys->addString(position_pid_to_reset_tag);
     listOfKeys->addString(position_pid_to_stop_tag);
-    listOfKeys->addString(position_direct_pid_references_tag);
-    listOfKeys->addString(position_direct_pid_errors_tag);
-    listOfKeys->addString(position_direct_pid_outputs_tag);
-    listOfKeys->addString(position_direct_pid_enabled_tag);
-    listOfKeys->addString(position_direct_pid_to_reset_tag);
     listOfKeys->addString(velocity_pid_references_tag);
     listOfKeys->addString(velocity_pid_errors_tag);
     listOfKeys->addString(velocity_pid_outputs_tag);
