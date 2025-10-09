@@ -38,6 +38,7 @@ static const std::string velocity_max_integral_tag = "velocity_max_integral";
 static const std::string velocity_max_output_tag = "velocity_max_output";
 static const std::string velocity_max_error_tag = "velocity_max_error";
 static const std::string position_pid_references_tag = "position_pid_references";
+static const std::string position_pid_reference_velocities_tag = "position_pid_reference_velocities";
 static const std::string position_pid_errors_tag = "position_pid_errors";
 static const std::string position_pid_outputs_tag = "position_pid_outputs";
 static const std::string is_motion_done_tag = "is_motion_done";
@@ -1968,20 +1969,79 @@ bool yarp::dev::IsaacSimControlBoardNWCROS2::setRefAccelerations(const int n_joi
 
 bool yarp::dev::IsaacSimControlBoardNWCROS2::getRefSpeed(int j, double* ref)
 {
-    // TODO
-    return false;
+    std::string errorPrefix = "[getRefSpeed] ";
+    if (!m_ready)
+    {
+        yCError(CB) << errorPrefix << "Services are not ready.";
+        return false;
+    }
+    std::lock_guard<std::mutex> lock(m_mutex);
+    std::string suffix_tag = "[" + std::to_string(j) + "]";
+    std::string parameter_name = position_pid_reference_velocities_tag + suffix_tag;
+    auto result = m_node->getParameters({ {parameter_name, Type::PARAMETER_DOUBLE} });
+    if (result.size() != 1)
+    {
+        yCError(CB) << errorPrefix << "Error while getting reference speed for joint" << j;
+        return false;
+    }
+    std::lock_guard<std::mutex> lock_reference(m_jointReferences.mutex);
+    m_jointReferences.convert_to_deg_if_revolute(j, result[0].double_value, *ref);
+    return true;
 }
 
 bool yarp::dev::IsaacSimControlBoardNWCROS2::getRefSpeeds(double* spds)
 {
-    // TODO
-    return false;
+    std::string errorPrefix = "[getRefSpeeds] ";
+    if (!m_ready)
+    {
+        yCError(CB) << errorPrefix << "Services are not ready.";
+        return false;
+    }
+    std::lock_guard<std::mutex> lock(m_mutex);
+    auto result = m_node->getParameters({ {position_pid_reference_velocities_tag, Type::PARAMETER_DOUBLE_ARRAY} });
+    if (result.size() != 1)
+    {
+        yCError(CB) << errorPrefix << "Error while getting reference speeds.";
+        return false;
+    }
+    std::lock_guard<std::mutex> lock_reference(m_jointReferences.mutex);
+    const auto& velocity_array = result[0].double_array_value;
+    size_t numberOfJoints = m_jointReferences.name.size();
+    for (size_t j = 0; j < numberOfJoints; j++)
+    {
+        m_jointReferences.convert_to_deg_if_revolute(j, velocity_array[j], spds[j]);
+    }
+    return true;
 }
 
 bool yarp::dev::IsaacSimControlBoardNWCROS2::getRefSpeeds(const int n_joints, const int* joints, double* spds)
 {
-    // TODO
-    return false;
+    std::string errorPrefix = "[getRefSpeeds] ";
+    if (!m_ready)
+    {
+        yCError(CB) << errorPrefix << "Services are not ready.";
+        return false;
+    }
+    std::lock_guard<std::mutex> lock(m_mutex);
+    auto result = m_node->getParameters({ {position_pid_reference_velocities_tag, Type::PARAMETER_DOUBLE_ARRAY} });
+    if (result.size() != 1)
+    {
+        yCError(CB) << errorPrefix << "Error while getting reference speeds.";
+        return false;
+    }
+    const auto& velocity_array = result[0].double_array_value;
+    for (int i = 0; i < n_joints; i++)
+    {
+        int j = joints[i];
+        if (j < 0 || static_cast<size_t>(j) >= velocity_array.size())
+        {
+            yCError(CB) << errorPrefix << "Index" << j << "out of range. Valid range is [0," << velocity_array.size() - 1 << "]";
+            return false;
+        }
+        std::lock_guard<std::mutex> lock_reference(m_jointReferences.mutex);
+        m_jointReferences.convert_to_deg_if_revolute(j, velocity_array[j], spds[i]);
+    }
+    return true;
 }
 
 bool yarp::dev::IsaacSimControlBoardNWCROS2::getRefAcceleration(int j, double* acc)
