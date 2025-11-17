@@ -107,11 +107,11 @@ class ControlBoardSettings:
     motor_max_currents: list[float]
 
 
-def create_vocab_32(a, b=chr(0), c=chr(0), d=chr(0)):
-    return (ord(a)) + (ord(b) << 8) + (ord(c) << 16) + (ord(d) << 24)
-
-
 class ControlMode(enum.IntEnum):
+    @staticmethod
+    def create_vocab_32(a, b=chr(0), c=chr(0), d=chr(0)):
+        return (ord(a)) + (ord(b) << 8) + (ord(c) << 16) + (ord(d) << 24)
+
     IDLE = create_vocab_32("i", "d", "l")  # VOCAB_CM_IDLE
     POSITION = create_vocab_32("p", "o", "s")  # VOCAB_CM_POSITION
     POSITION_DIRECT = create_vocab_32("p", "o", "s", "d")  # VOCAB_CM_POSITION_DIRECT
@@ -625,6 +625,8 @@ class ControlBoardPID:
         self.integral_state = 0.0
         self.previous_error = 0.0
         self.reference = None
+        self.input_reference = None
+        self.input_reference_velocity = None
         self.smoother = None
         self.smoother_active = False
         self.compliant_offset = None
