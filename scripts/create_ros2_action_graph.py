@@ -12,7 +12,9 @@ import dataclasses
 import math
 import os
 
+import isaacsim.core.utils.stage as stage_utils
 import omni.graph.core as og
+from pxr import PhysxSchema, Sdf, UsdPhysics
 
 
 @dataclasses.dataclass
@@ -76,6 +78,7 @@ class Settings:
     imus: list[Imu]
     cameras: list[Camera]
     FTs: list[FT]
+    sim_frequency: float
 
 
 # When creating nodes, first you specify the name of the node, and then the type of
@@ -907,6 +910,31 @@ def create_graph(actions_list):
         print("FAILED TO CREATE GRAPH!")
 
 
+def set_sim_frequency(freq):
+    if freq is None:
+        return
+
+    stage = stage_utils.get_current_stage()
+
+    physics_scene_name = "/World/physicsScene"
+    # Add a physics scene prim to stage
+    UsdPhysics.Scene.Define(stage, Sdf.Path(physics_scene_name))
+
+    # Add PhysxSceneAPI
+    PhysxSchema.PhysxSceneAPI.Apply(stage.GetPrimAtPath(physics_scene_name))
+
+    physx_scene_api = PhysxSchema.PhysxSceneAPI.Get(stage, physics_scene_name)
+    # Number of physics steps per second
+    physx_scene_api.CreateTimeStepsPerSecondAttr(freq)
+
+    layer = stage.GetRootLayer()
+    # Number of rendering updates per second
+    # This frequency also affects the "Playback Tick" of the OmniGraph
+    layer.timeCodesPerSecond = freq
+
+    print(f"Simulator frequency changed to {freq}Hz.")
+
+
 #######################################################################################
 ########################## EDIT ONLY THE SETTINGS HERE BELOW ##########################
 #######################################################################################
@@ -1252,12 +1280,14 @@ s = Settings(
             flip=False,
         ),
     ],
+    sim_frequency=100.0,  # Simulation frequency in Hz (set to None to keep default)
 )
 
 #######################################################################################
 #######################################################################################
 #######################################################################################
 
+set_sim_frequency(s.sim_frequency)
 keys = og.Controller.Keys
 create_graph(
     [

@@ -6,15 +6,16 @@ freq = 100
 
 stage = stage_utils.get_current_stage()
 
+physics_scene_name = "/World/physicsScene"
 # Add a physics scene prim to stage
-scene = UsdPhysics.Scene.Define(stage, Sdf.Path("/World/physicsScene"))
+UsdPhysics.Scene.Define(stage, Sdf.Path(physics_scene_name))
 
 # Add PhysxSceneAPI
-PhysxSchema.PhysxSceneAPI.Apply(stage.GetPrimAtPath("/World/physicsScene"))
+PhysxSchema.PhysxSceneAPI.Apply(stage.GetPrimAtPath(physics_scene_name))
 
-physxSceneAPI = PhysxSchema.PhysxSceneAPI.Get(stage, "/World/physicsScene")
+physx_scene_api = PhysxSchema.PhysxSceneAPI.Get(stage, physics_scene_name)
 # Number of physics steps per second
-physxSceneAPI.CreateTimeStepsPerSecondAttr(freq)
+physx_scene_api.CreateTimeStepsPerSecondAttr(freq)
 
 layer = stage.GetRootLayer()
 # Number of rendering updates per second
