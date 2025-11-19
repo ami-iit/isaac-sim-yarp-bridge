@@ -8,10 +8,40 @@ file.
 ################### EDIT ONLY THE SETTINGS AT THE END OF THE FILE #####################
 #######################################################################################
 
-
 import dataclasses
+import math
+import os
 
+import isaacsim.core.utils.stage as stage_utils
 import omni.graph.core as og
+from pxr import PhysxSchema, Sdf, UsdPhysics
+
+
+@dataclasses.dataclass
+class ControlBoard:
+    name: str
+    joint_names: list[str]
+    joint_damping: list[float]
+    position_p_gains: list[float]
+    position_i_gains: list[float]
+    position_d_gains: list[float]
+    position_max_integral: list[float]
+    position_max_output: list[float]
+    position_max_error: list[float]
+    position_default_velocity: float
+    compliant_stiffness: list[float]
+    compliant_damping: list[float]
+    velocity_p_gains: list[float]
+    velocity_i_gains: list[float]
+    velocity_d_gains: list[float]
+    velocity_max_integral: list[float]
+    velocity_max_output: list[float]
+    velocity_max_error: list[float]
+    gearbox_ratios: list[float]
+    motor_torque_constants: list[float]
+    motor_current_noise_variance: list[float]
+    motor_spring_stiffness: list[float]
+    motor_max_currents: list[float]
 
 
 @dataclasses.dataclass
@@ -39,16 +69,32 @@ class FT:
 @dataclasses.dataclass
 class Settings:
     graph_path: str
-    articulation_root: str
+    robot_path: str
     topic_prefix: str
+    domain_id: int
+    useDomainIDEnvVar: bool
+    node_timeout: float
+    control_boards: list[ControlBoard]
     imus: list[Imu]
     cameras: list[Camera]
     FTs: list[FT]
+    sim_frequency: float
+
+
+# When creating nodes, first you specify the name of the node, and then the type of
+# node. If instead of the type, you pass a dict with a series of other actions, you
+# are creating a compound node instead (basically a subgraph). The inputs and
+# outputs of a compound node are defined by "promoting" inputs and outputs of the
+# internal nodes. If multiple internal nodes need to be connected to the same
+# input/outputs, this connection is done explicitly after creating the compound,
+# using the compound name.
 
 
 def merge_actions(action_list):
     output = {}
     for d in action_list:
+        if d is None:
+            continue
         for key, value in d.items():
             if key in output:
                 for val in value:
@@ -58,7 +104,7 @@ def merge_actions(action_list):
     return output
 
 
-def add_basic_nodes(graph_keys):
+def create_basic_nodes(graph_keys, settings):
     return {
         graph_keys.CREATE_NODES: [
             ("tick", "omni.graph.action.OnPlaybackTick"),
@@ -67,11 +113,13 @@ def add_basic_nodes(graph_keys):
         ],
         graph_keys.SET_VALUES: [
             ("sim_time.inputs:resetOnStop", True),
+            ("ros2_context.inputs:domain_id", settings.domain_id),
+            ("ros2_context.inputs:useDomainIDEnvVar", settings.useDomainIDEnvVar),
         ],
     }
 
 
-def add_ros2_clock_publisher(graph_keys):
+def create_ros2_clock_publisher(graph_keys):
     return {
         graph_keys.CREATE_NODES: [
             ("ros2_clock_publisher", "isaacsim.ros2.bridge.ROS2PublishClock"),
@@ -87,103 +135,338 @@ def add_ros2_clock_publisher(graph_keys):
     }
 
 
-# When creating nodes, first you specify the name of the node, and then the type of
-# node. If instead of the type, you pass a dict with a series of other actions, you
-# are creating a compound node instead (basically a subgraph). The inputs and
-# outputs of a compound node are defined by "promoting" inputs and outputs of the
-# internal nodes. If multiple internal nodes need to be connected to the same
-# input/outputs, this connection is done explicitly after creating the compound,
-# using the compound name.
+def create_control_board_subcompound(
+    graph_keys, board_settings, full_settings, promoted
+):
+    compound_name = board_settings.name + "_compound"
+    subscriber_name = board_settings.name + "_subscriber"
+    cb_script_name = board_settings.name + "_script"
+    cb_topic_prefix = full_settings.topic_prefix + "/" + board_settings.name
+    script_file = os.path.join(
+        os.environ["ISAAC_SIM_YARP_BRIDGE_PATH"], "scripts", "omni_control_board.py"
+    )
 
+    if not os.path.exists(script_file):
+        raise FileNotFoundError(
+            f"Control board script file not found at {script_file}. "
+            "Please ensure ISAAC_SIM_YARP_BRIDGE_PATH is set correctly."
+        )
 
-def add_ros2_joint_compound(graph_keys, settings):
-    compound_name = "ros2_joint_compound"
-    return {
+    compound_actions = {
         graph_keys.CREATE_NODES: [
+            (subscriber_name, "isaacsim.ros2.bridge.ROS2SubscribeJointState"),
+            (cb_script_name, "omni.graph.scriptnode.ScriptNode"),
+        ],
+        graph_keys.CREATE_ATTRIBUTES: [
+            (cb_script_name + ".inputs:timestamp", "double"),
+            (cb_script_name + ".inputs:deltaTime", "double"),
+            (cb_script_name + ".inputs:reference_joint_names", "token[]"),
+            (cb_script_name + ".inputs:reference_position_commands", "double[]"),
+            (cb_script_name + ".inputs:reference_velocity_commands", "double[]"),
+            (cb_script_name + ".inputs:reference_effort_commands", "double[]"),
+            (cb_script_name + ".inputs:robot_prim", "target"),
+            (cb_script_name + ".inputs:domain_id", "uchar"),
+            (cb_script_name + ".inputs:useDomainIDEnvVar", "bool"),
+            (cb_script_name + ".inputs:node_name", "string"),
+            (cb_script_name + ".inputs:node_set_parameters_service_name", "string"),
+            (cb_script_name + ".inputs:node_get_parameters_service_name", "string"),
+            (cb_script_name + ".inputs:node_state_topic_name", "string"),
+            (cb_script_name + ".inputs:node_motor_state_topic_name", "string"),
+            (cb_script_name + ".inputs:node_timeout", "double"),
+            (cb_script_name + ".inputs:joint_names", "token[]"),
+            (cb_script_name + ".inputs:position_p_gains", "double[]"),
+            (cb_script_name + ".inputs:position_i_gains", "double[]"),
+            (cb_script_name + ".inputs:position_d_gains", "double[]"),
+            (cb_script_name + ".inputs:position_max_integral", "double[]"),
+            (cb_script_name + ".inputs:position_max_output", "double[]"),
+            (cb_script_name + ".inputs:position_max_error", "double[]"),
+            (cb_script_name + ".inputs:position_default_velocity", "double"),
+            (cb_script_name + ".inputs:compliant_stiffness", "double[]"),
+            (cb_script_name + ".inputs:compliant_damping", "double[]"),
+            (cb_script_name + ".inputs:velocity_p_gains", "double[]"),
+            (cb_script_name + ".inputs:velocity_i_gains", "double[]"),
+            (cb_script_name + ".inputs:velocity_d_gains", "double[]"),
+            (cb_script_name + ".inputs:velocity_max_integral", "double[]"),
+            (cb_script_name + ".inputs:velocity_max_output", "double[]"),
+            (cb_script_name + ".inputs:velocity_max_error", "double[]"),
+            (cb_script_name + ".inputs:gearbox_ratios", "double[]"),
+            (cb_script_name + ".inputs:motor_torque_constants", "double[]"),
+            (cb_script_name + ".inputs:motor_current_noise_variance", "double[]"),
+            (cb_script_name + ".inputs:motor_spring_stiffness", "double[]"),
+            (cb_script_name + ".inputs:motor_max_currents", "double[]"),
+            (cb_script_name + ".outputs:desired_efforts", "double[]"),
+        ],
+        graph_keys.SET_VALUES: [
             (
-                compound_name,
-                {
-                    graph_keys.CREATE_NODES: [
-                        (
-                            "ros2_joint_publisher",
-                            "isaacsim.ros2.bridge.ROS2PublishJointState",
-                        ),
-                        (
-                            "ros2_joint_subscriber",
-                            "isaacsim.ros2.bridge.ROS2SubscribeJointState",
-                        ),
-                        (
-                            "articulation_controller",
-                            "isaacsim.core.nodes.IsaacArticulationController",
-                        ),
-                    ],
-                    graph_keys.SET_VALUES: [
-                        (
-                            "ros2_joint_publisher.inputs:targetPrim",
-                            settings.articulation_root,
-                        ),
-                        (
-                            "ros2_joint_publisher.inputs:topicName",
-                            settings.topic_prefix + "/joint_state",
-                        ),
-                        (
-                            "ros2_joint_subscriber.inputs:topicName",
-                            settings.topic_prefix + "/joint_state/input",
-                        ),
-                        (
-                            "articulation_controller.inputs:targetPrim",
-                            settings.articulation_root,
-                        ),
-                    ],
-                    graph_keys.PROMOTE_ATTRIBUTES: [
-                        ("ros2_joint_publisher.inputs:execIn", "inputs:execIn"),
-                        ("ros2_joint_publisher.inputs:context", "inputs:context"),
-                        ("ros2_joint_publisher.inputs:timeStamp", "inputs:timeStamp"),
-                    ],
-                    graph_keys.CONNECT: [
-                        (
-                            "ros2_joint_subscriber.outputs:effortCommand",
-                            "articulation_controller.inputs:effortCommand",
-                        ),
-                        (
-                            "ros2_joint_subscriber.outputs:jointNames",
-                            "articulation_controller.inputs:jointNames",
-                        ),
-                        (
-                            "ros2_joint_subscriber.outputs:positionCommand",
-                            "articulation_controller.inputs:positionCommand",
-                        ),
-                        (
-                            "ros2_joint_subscriber.outputs:velocityCommand",
-                            "articulation_controller.inputs:velocityCommand",
-                        ),
-                    ],
-                },
-            )
+                subscriber_name + ".inputs:topicName",
+                cb_topic_prefix + "/joint_state/input",
+            ),
+            (cb_script_name + ".inputs:usePath", True),
+            (cb_script_name + ".inputs:scriptPath", script_file),
+            (cb_script_name + ".inputs:robot_prim", full_settings.robot_path),
+            (cb_script_name + ".inputs:domain_id", full_settings.domain_id),
+            (
+                cb_script_name + ".inputs:useDomainIDEnvVar",
+                full_settings.useDomainIDEnvVar,
+            ),
+            (cb_script_name + ".inputs:node_name", board_settings.name + "_node"),
+            (
+                cb_script_name + ".inputs:node_set_parameters_service_name",
+                cb_topic_prefix + "/set_parameters",
+            ),
+            (
+                cb_script_name + ".inputs:node_get_parameters_service_name",
+                cb_topic_prefix + "/get_parameters",
+            ),
+            (
+                cb_script_name + ".inputs:node_state_topic_name",
+                cb_topic_prefix + "/joint_state",
+            ),
+            (
+                cb_script_name + ".inputs:node_motor_state_topic_name",
+                cb_topic_prefix + "/motor_state",
+            ),
+            (cb_script_name + ".inputs:node_timeout", full_settings.node_timeout),
+            (cb_script_name + ".inputs:joint_names", board_settings.joint_names),
+            (
+                cb_script_name + ".inputs:position_p_gains",
+                board_settings.position_p_gains,
+            ),
+            (
+                cb_script_name + ".inputs:position_i_gains",
+                board_settings.position_i_gains,
+            ),
+            (
+                cb_script_name + ".inputs:position_d_gains",
+                board_settings.position_d_gains,
+            ),
+            (
+                cb_script_name + ".inputs:position_max_integral",
+                board_settings.position_max_integral,
+            ),
+            (
+                cb_script_name + ".inputs:position_max_output",
+                board_settings.position_max_output,
+            ),
+            (
+                cb_script_name + ".inputs:position_max_error",
+                board_settings.position_max_error,
+            ),
+            (
+                cb_script_name + ".inputs:position_default_velocity",
+                board_settings.position_default_velocity,
+            ),
+            (
+                cb_script_name + ".inputs:compliant_stiffness",
+                board_settings.compliant_stiffness,
+            ),
+            (
+                cb_script_name + ".inputs:compliant_damping",
+                board_settings.compliant_damping,
+            ),
+            (
+                cb_script_name + ".inputs:velocity_p_gains",
+                board_settings.velocity_p_gains,
+            ),
+            (
+                cb_script_name + ".inputs:velocity_i_gains",
+                board_settings.velocity_i_gains,
+            ),
+            (
+                cb_script_name + ".inputs:velocity_d_gains",
+                board_settings.velocity_d_gains,
+            ),
+            (
+                cb_script_name + ".inputs:velocity_max_integral",
+                board_settings.velocity_max_integral,
+            ),
+            (
+                cb_script_name + ".inputs:velocity_max_output",
+                board_settings.velocity_max_output,
+            ),
+            (
+                cb_script_name + ".inputs:velocity_max_error",
+                board_settings.velocity_max_error,
+            ),
+            (cb_script_name + ".inputs:gearbox_ratios", board_settings.gearbox_ratios),
+            (
+                cb_script_name + ".inputs:motor_torque_constants",
+                board_settings.motor_torque_constants,
+            ),
+            (
+                cb_script_name + ".inputs:motor_current_noise_variance",
+                board_settings.motor_current_noise_variance,
+            ),
+            (
+                cb_script_name + ".inputs:motor_spring_stiffness",
+                board_settings.motor_spring_stiffness,
+            ),
+            (
+                cb_script_name + ".inputs:motor_max_currents",
+                board_settings.motor_max_currents,
+            ),
+        ],
+        graph_keys.PROMOTE_ATTRIBUTES: [
+            (subscriber_name + ".inputs:execIn", "inputs:execIn"),
+            (subscriber_name + ".inputs:context", "inputs:context"),
+            (cb_script_name + ".inputs:timestamp", "inputs:timestamp"),
+            (cb_script_name + ".inputs:deltaTime", "inputs:deltaTime"),
+            (cb_script_name + ".outputs:execOut", "outputs:execOut"),
+            (cb_script_name + ".outputs:desired_efforts", "outputs:desired_efforts"),
         ],
         graph_keys.CONNECT: [
-            ("tick.outputs:tick", compound_name + ".inputs:execIn"),
             (
-                "ros2_context.outputs:context",
-                compound_name + ".inputs:context",
+                subscriber_name + ".outputs:jointNames",
+                cb_script_name + ".inputs:reference_joint_names",
             ),
             (
-                "sim_time.outputs:simulationTime",
-                compound_name + ".inputs:timeStamp",
+                subscriber_name + ".outputs:positionCommand",
+                cb_script_name + ".inputs:reference_position_commands",
             ),
             (
-                compound_name + ".inputs:execIn",
-                "ros2_joint_subscriber.inputs:execIn",
+                subscriber_name + ".outputs:velocityCommand",
+                cb_script_name + ".inputs:reference_velocity_commands",
             ),
             (
-                compound_name + ".inputs:context",
-                "ros2_joint_subscriber.inputs:context",
-            ),
-            (
-                compound_name + ".inputs:execIn",
-                "articulation_controller.inputs:execIn",
+                subscriber_name + ".outputs:effortCommand",
+                cb_script_name + ".inputs:reference_effort_commands",
             ),
         ],
+    }
+
+    output = {
+        graph_keys.CREATE_NODES: [(compound_name, compound_actions)],
+        # Since we can promote only one execIn, we do the connections here explicitly
+        graph_keys.CONNECT: [
+            (compound_name + ".inputs:execIn", cb_script_name + ".inputs:execIn"),
+        ],
+    }
+
+    if promoted:
+        output[graph_keys.PROMOTE_ATTRIBUTES] = [
+            (compound_name + ".inputs:execIn", "inputs:execIn"),
+            (compound_name + ".inputs:context", "inputs:context"),
+            (compound_name + ".inputs:timestamp", "inputs:timestamp"),
+            (compound_name + ".inputs:deltaTime", "inputs:deltaTime"),
+        ]
+
+    return output, compound_name
+
+
+def create_control_board_compounds(graph_keys, settings):
+    if len(settings.control_boards) == 0:
+        return None
+
+    compound_name = "ros2_control_boards_compound"
+    connections = []
+    subcompound_actions = []
+
+    script_file = os.path.join(
+        os.environ["ISAAC_SIM_YARP_BRIDGE_PATH"], "scripts", "omni_set_robot_efforts.py"
+    )
+    if not os.path.exists(script_file):
+        raise FileNotFoundError(
+            f"Set robot efforts script file not found at {script_file}. "
+            "Please ensure ISAAC_SIM_YARP_BRIDGE_PATH is set correctly."
+        )
+
+    set_efforts_name = "set_robot_efforts"
+    all_joints = []
+    damping = []
+    control_boards = []
+    for cb in settings.control_boards:
+        all_joints.extend(cb.joint_names)
+        damping.extend(cb.joint_damping)
+        control_boards.append(cb.name)
+
+    set_efforts_actions = {
+        graph_keys.CREATE_NODES: [
+            (set_efforts_name, "omni.graph.scriptnode.ScriptNode"),
+        ],
+        graph_keys.CREATE_ATTRIBUTES: [
+            (set_efforts_name + ".inputs:robot_prim", "target"),
+            (set_efforts_name + ".inputs:joint_names", "token[]"),
+            (set_efforts_name + ".inputs:desired_joint_damping", "double[]"),
+            (set_efforts_name + ".inputs:control_board_names", "token[]"),
+        ],
+        graph_keys.SET_VALUES: [
+            (set_efforts_name + ".inputs:usePath", True),
+            (set_efforts_name + ".inputs:scriptPath", script_file),
+            (set_efforts_name + ".inputs:robot_prim", settings.robot_path),
+            (set_efforts_name + ".inputs:joint_names", all_joints),
+            (set_efforts_name + ".inputs:desired_joint_damping", damping),
+            (set_efforts_name + ".inputs:control_board_names", control_boards),
+        ],
+        graph_keys.CONNECT: [],
+    }
+
+    promote = True
+    for board in settings.control_boards:
+        compound_actions, subcompound_name = create_control_board_subcompound(
+            graph_keys, board, settings, promoted=promote
+        )
+        subcompound_actions.append(compound_actions)
+        if not promote:
+            # Add the connections to the inner compound inputs for the internal inputs
+            # that have not been promoted
+            connections.append(
+                (compound_name + ".inputs:execIn", subcompound_name + ".inputs:execIn")
+            )
+            connections.append(
+                (
+                    compound_name + ".inputs:context",
+                    subcompound_name + ".inputs:context",
+                )
+            )
+            connections.append(
+                (
+                    compound_name + ".inputs:timestamp",
+                    subcompound_name + ".inputs:timestamp",
+                )
+            )
+            connections.append(
+                (
+                    compound_name + ".inputs:deltaTime",
+                    subcompound_name + ".inputs:deltaTime",
+                )
+            )
+
+        promote = False  # Only the first compound promotes the attributes
+
+        set_efforts_actions[graph_keys.CREATE_ATTRIBUTES].append(
+            (f"{set_efforts_name}.inputs:{board.name}_desired_efforts", "double[]")
+        )
+        set_efforts_actions[graph_keys.CONNECT].append(
+            (
+                f"{subcompound_name}.outputs:desired_efforts",
+                f"{set_efforts_name}.inputs:{board.name}_desired_efforts",
+            ),
+        )
+        # We connect the execOut of each control board to the execIn of the set_efforts
+        # node, so that we set the efforts only after all control boards have been
+        # updated. The script inside the set_efforts node takes care of waiting
+        # until it has received at least one execIn from each control board before
+        # setting the efforts.
+        connections.append(
+            (subcompound_name + ".outputs:execOut", set_efforts_name + ".inputs:execIn")
+        )
+
+    subcompound_actions.append(set_efforts_actions)
+
+    connections.append(("tick.outputs:tick", compound_name + ".inputs:execIn"))
+    connections.append(
+        ("ros2_context.outputs:context", compound_name + ".inputs:context")
+    )
+    connections.append(
+        ("sim_time.outputs:simulationTime", compound_name + ".inputs:timestamp")
+    )
+    connections.append(
+        ("tick.outputs:deltaSeconds", compound_name + ".inputs:deltaTime")
+    )
+
+    return {
+        graph_keys.CREATE_NODES: [(compound_name, merge_actions(subcompound_actions))],
+        graph_keys.CONNECT: connections,
     }
 
 
@@ -237,7 +520,7 @@ def create_imu_subcompound(graph_keys, settings, name, target):
 
 def create_imu_compounds(graph_keys, settings):
     if len(settings.imus) == 0:
-        return
+        return None
 
     compound_name = "ros2_imus_compound"
     imu_compounds = []
@@ -390,7 +673,7 @@ def create_camera_subcompound(
 
 def create_camera_compounds(graph_keys, settings):
     if len(settings.cameras) == 0:
-        return
+        return None
 
     compound_name = "ros2_cameras_compound"
     subcompound_actions = []
@@ -438,210 +721,15 @@ def create_ft_subcompound(graph_keys, name, joint, frame, flip, topic_prefix):
     break_torque_node_name = "break_" + name + "_torque"
     publish_node_name = "publisher_" + name
     topic_name = topic_prefix + "/" + name
-
-    script_code = """
-# Expects four inputs:
-# - FTFrame [target] The link with respect to which express the measure, e.g. /World/ergoCubSN002/l_foot_front_ft
-# - FTJoint [target] The fixed joint corresponding to the FT sensor, e.g. /World/ergoCubSN002/joints/l_foot_front_ft_sensor
-# - flipMeasure [bool] A boolean to flip the measurement. By default (false), the measured wrench is the one exerted by the FT.
-# - timestamp [double] The simulation time to convert to a ROS compatible timestamp
-
-# Expects four outputs:
-# - force [double[3]] The measured force
-# - torque [double[3]] The measured torque
-# - value_sec [int] The seconds for the value timestamp
-# - value_nanosec [uint] The additional number of nanoseconds for the value timestamp
-
-
-import math
-
-import isaacsim.core.utils.rotations as rotations_utils
-import isaacsim.core.utils.stage as stage_utils
-import isaacsim.core.utils.xforms as xforms_utils
-import numpy as np
-from isaacsim.core.api.robots import RobotView
-from pxr.UsdPhysics import Joint
-
-
-class CustomState:
-
-    def __init__(self):
-        self.robot_object = None
-        self.joint_index = None
-        self.sensor_transform = np.eye(4)
-
-
-def get_parent_robot(prim):
-    parent_prim = prim.GetParent()
-    while parent_prim.IsValid() and not parent_prim.HasAPI("IsaacRobotAPI"):
-        parent_prim = parent_prim.GetParent()
-
-    return parent_prim
-
-
-def get_a_H_b(a_prim, b_prim):
-    pos_a, quat_a = xforms_utils.get_world_pose(str(a_prim.GetPath()))
-    pos_b, quat_b = xforms_utils.get_world_pose(str(b_prim.GetPath()))
-    w_R_a = rotations_utils.quat_to_rot_matrix(quat_a)
-    w_R_b = rotations_utils.quat_to_rot_matrix(quat_b)
-
-    a_R_w = w_R_a.T
-    a_R_b = a_R_w @ w_R_b
-    a_P_b = a_R_w @ (pos_b - pos_a)
-
-    a_H_b = np.eye(4)
-    a_H_b[:3, :3] = a_R_b
-    a_H_b[:3, 3] = a_P_b
-
-    return a_H_b
-
-
-def create_robot_object(db):
-    FTJoint = db.inputs.FTJoint
-
-    if not FTJoint:
-        db.log_error(f"FTJoint input is empty")
-        return
-
-    stage = stage_utils.get_current_stage()
-
-    FTJoint_path = FTJoint[0].pathString
-    joint_prim = stage.GetPrimAtPath(FTJoint_path)
-    joint_name = joint_prim.GetName()
-
-    if not joint_prim.IsValid():
-        db.log_error(f"The joint prim ({joint_prim}) is not valid")
-        return
-
-    if not joint_prim.HasAPI("IsaacJointAPI"):
-        db.log_error(f"The specified prim ({joint_prim}) is not a joint")
-        return
-
-    parent_prim = get_parent_robot(joint_prim)
-
-    if not parent_prim.IsValid():
-        db.log_error(
-            f"Failed to find a parent to {joint_prim} that has the IsaacRobotAPI."
-            f"Is the joint attached to a robot?"
-        )
-        return
-
-    robot_object = RobotView(
-        prim_paths_expr=str(parent_prim.GetPath()), name=f"robot_ft_{FTJoint_path}"
+    script_path = os.path.join(
+        os.environ["ISAAC_SIM_YARP_BRIDGE_PATH"], "scripts", "omni_read_FT.py"
     )
 
-    if joint_name in robot_object.dof_names:
-        db.log_error(f"The FT joint {joint_name} is not fixed.")
-        return
-
-    # See https://docs.isaacsim.omniverse.nvidia.com/5.0.0/py/source/extensions/isaacsim.core.api/docs/index.html#isaacsim.core.api.robots.RobotView.get_measured_joint_forces
-
-    joint_index = robot_object.get_joint_index(joint_name) + 1
-
-    robot_object.initialize()
-
-    joint_api = Joint(joint_prim)
-    b1 = joint_api.GetBody1Rel().GetTargets()[0]
-    b1_prim = stage.GetPrimAtPath(b1)
-
-    FTFrameInput = db.inputs.FTFrame
-
-    if not FTFrameInput:
-        print(
-            f"No frame provided for FT joint {joint_name}. "
-            f"FT measures will be provided in the {b1_prim.GetName()} frame."
+    if not os.path.exists(script_path):
+        raise FileNotFoundError(
+            f"FT script file not found at {script_path}. "
+            "Please ensure ISAAC_SIM_YARP_BRIDGE_PATH is set correctly."
         )
-        return robot_object, joint_index, np.eye(4)
-
-    FTFrame_prim = stage.GetPrimAtPath(FTFrameInput[0].pathString)
-
-    if not FTFrame_prim.IsValid():
-        db.log_error(f"The  prim ({FTFrame_prim}) is not valid")
-        return
-
-    FTFrame_robot_prim = get_parent_robot(FTFrame_prim)
-
-    if FTFrame_robot_prim != parent_prim:
-        db.log_error(
-            f"The specified prim ({FTFrame_prim}) has parent "
-            f"{FTFrame_robot_prim} that is different from {parent_prim}."
-        )
-        return
-
-    relative_transform = get_a_H_b(FTFrame_prim, b1_prim)
-
-    print(
-        f"Info: expressing {joint_name} readings in {FTFrame_prim.GetName()} "
-        f"with relative transform:"
-    )
-    print(relative_transform)
-
-    return robot_object, joint_index, relative_transform
-
-
-def internal_state():
-    return CustomState()
-
-
-def setup(db: og.Database) -> bool:
-    output = create_robot_object(db)
-    if not output:
-        db.log_error("Setup failed")
-        return False
-    robot_object, joint_index, sensor_transform = output
-    db.per_instance_state.robot_object = robot_object
-    db.per_instance_state.joint_index = joint_index
-    db.per_instance_state.sensor_transform = sensor_transform
-    return True
-
-
-def cleanup(db: og.Database):
-    db.per_instance_state.robot_object = None
-    db.per_instance_state.joint_index = None
-    db.per_instance_state.sensor_transform = np.eye(4)
-
-
-def compute(db: og.Database) -> bool:
-    state = db.per_instance_state
-    if not hasattr(state, "robot_object") or state.robot_object is None:
-        setup(db)
-        return False
-
-    out = state.robot_object.get_measured_joint_forces(
-        joint_indices=[state.joint_index]
-    )
-    if out is None:
-        db.log_warning(f"Failed to get measured joint forces. Running setup again")
-        setup(db)
-        return False
-    wrench = out.squeeze()
-
-    position = db.per_instance_state.sensor_transform[:3, 3]
-    rotation = db.per_instance_state.sensor_transform[:3, :3]
-
-    force = wrench[:3]
-    torque = wrench[3:]
-
-    db.outputs.force = rotation @ force
-    db.outputs.torque = rotation @ torque + np.cross(position, db.outputs.force)
-
-    if hasattr(db.inputs, "flipMeasure") and db.inputs.flipMeasure:
-        db.outputs.force *= -1
-        db.outputs.torque *= -1
-
-    if (
-        hasattr(db.inputs, "timestamp")
-        and hasattr(db.outputs, "value_sec")
-        and hasattr(db.outputs, "value_nanosec")
-    ):
-        sec = math.floor(db.inputs.timestamp)
-        nanosec = (db.inputs.timestamp - sec) * 1e9
-        db.outputs.value_sec = int(sec)
-        db.outputs.value_nanosec = int(nanosec)
-
-    return True
-
-    """
 
     return {
         graph_keys.CREATE_NODES: [
@@ -675,7 +763,8 @@ def compute(db: og.Database) -> bool:
             (script_node_name + ".inputs:FTJoint", joint),
             (script_node_name + ".inputs:FTFrame", frame),
             (script_node_name + ".inputs:flipMeasure", flip),
-            (script_node_name + ".inputs:script", script_code),
+            (script_node_name + ".inputs:usePath", True),
+            (script_node_name + ".inputs:scriptPath", script_path),
             (publish_node_name + ".inputs:header:frame_id", name),
             (publish_node_name + ".inputs:messageName", "WrenchStamped"),
             (publish_node_name + ".inputs:messagePackage", "geometry_msgs"),
@@ -740,7 +829,7 @@ def compute(db: og.Database) -> bool:
 
 def create_ft_compounds(graph_keys, settings):
     if len(settings.FTs) == 0:
-        return
+        return None
 
     ft_compounds = []
     first_compound = None
@@ -821,6 +910,31 @@ def create_graph(actions_list):
         print("FAILED TO CREATE GRAPH!")
 
 
+def set_sim_frequency(freq):
+    if freq is None:
+        return
+
+    stage = stage_utils.get_current_stage()
+
+    physics_scene_name = "/World/physicsScene"
+    # Add a physics scene prim to stage
+    UsdPhysics.Scene.Define(stage, Sdf.Path(physics_scene_name))
+
+    # Add PhysxSceneAPI
+    PhysxSchema.PhysxSceneAPI.Apply(stage.GetPrimAtPath(physics_scene_name))
+
+    physx_scene_api = PhysxSchema.PhysxSceneAPI.Get(stage, physics_scene_name)
+    # Number of physics steps per second
+    physx_scene_api.CreateTimeStepsPerSecondAttr(freq)
+
+    layer = stage.GetRootLayer()
+    # Number of rendering updates per second
+    # This frequency also affects the "Playback Tick" of the OmniGraph
+    layer.timeCodesPerSecond = freq
+
+    print(f"Simulator frequency changed to {freq}Hz.")
+
+
 #######################################################################################
 ########################## EDIT ONLY THE SETTINGS HERE BELOW ##########################
 #######################################################################################
@@ -829,8 +943,273 @@ robot_path = "/World/ergoCubSN002/robot"
 realsense_prefix = robot_path + "/realsense/sensors/RSD455"
 s = Settings(
     graph_path="/World/ergoCubSN002/ros2_action_graph",
-    articulation_root=robot_path + "/root_link",
+    robot_path=robot_path,
     topic_prefix="/ergocub",
+    domain_id=0,
+    useDomainIDEnvVar=True,
+    node_timeout=0.001,
+    control_boards=[
+        ControlBoard(
+            name="head",
+            joint_names=["neck_pitch", "neck_roll", "neck_yaw", "camera_tilt"],
+            joint_damping=[1.0, 1.0, 1.0, 1.0],
+            position_p_gains=[1.745, 1.745, 1.745, 1.745],
+            position_i_gains=[0.003, 0.003, 0.003, 0.003],
+            position_d_gains=[0.122, 0.122, 0.122, 0.122],
+            position_max_integral=[9999.0, 9999.0, 9999.0, 9999.0],
+            position_max_output=[9999.0, 9999.0, 9999.0, 9999.0],
+            position_max_error=[9999.0, 9999.0, 9999.0, 9999.0],
+            velocity_p_gains=[8.726, 8.726, 8.726, 8.726],
+            velocity_i_gains=[0.003, 0.003, 0.003, 0.003],
+            velocity_d_gains=[0.035, 0.035, 0.035, 0.035],
+            velocity_max_integral=[9999.0, 9999.0, 9999.0, 9999.0],
+            velocity_max_output=[9999.0, 9999.0, 9999.0, 9999.0],
+            velocity_max_error=[9999.0, 9999.0, 9999.0, 9999.0],
+            position_default_velocity=10.0 * math.pi / 180.0,
+            compliant_stiffness=[0.0, 0.0, 0.0, 0.0],
+            compliant_damping=[0.0, 0.0, 0.0, 0.0],
+            gearbox_ratios=[100.0, 100.0, 100.0, -141.0],
+            motor_torque_constants=[1.0, 1.0, 1.0, 1.0],
+            motor_current_noise_variance=[0.01, 0.01, 0.01, 0.01],
+            motor_spring_stiffness=[0.0, 0.0, 0.0, 0.0],
+            motor_max_currents=[9999.0, 9999.0, 9999.0, 9999.0],
+        ),
+        ControlBoard(
+            name="torso",
+            joint_names=["torso_roll", "torso_pitch", "torso_yaw"],
+            joint_damping=[1.0, 1.0, 1.0],
+            position_p_gains=[70.0, 70.0, 70.0],
+            position_i_gains=[0.17, 0.17, 0.17],
+            position_d_gains=[0.15, 0.15, 0.15],
+            position_max_integral=[9999.0, 9999.0, 9999.0],
+            position_max_output=[9999.0, 9999.0, 9999.0],
+            position_max_error=[9999.0, 9999.0, 9999.0],
+            velocity_p_gains=[8.726, 8.726, 8.726],
+            velocity_i_gains=[0.002, 0.002, 0.002],
+            velocity_d_gains=[0.035, 0.035, 0.035],
+            velocity_max_integral=[9999.0, 9999.0, 9999.0],
+            velocity_max_output=[9999.0, 9999.0, 9999.0],
+            velocity_max_error=[9999.0, 9999.0, 9999.0],
+            position_default_velocity=10.0 * math.pi / 180.0,
+            compliant_stiffness=[0.0, 0.0, 0.0],
+            compliant_damping=[0.0, 0.0, 0.0],
+            gearbox_ratios=[100.0, 160.0, -100.0],
+            motor_torque_constants=[1.0, 1.0, 1.0],
+            motor_current_noise_variance=[0.01, 0.01, 0.01],
+            motor_spring_stiffness=[0.0, 0.0, 0.0],
+            motor_max_currents=[9999.0, 9999.0, 9999.0],
+        ),
+        ControlBoard(
+            name="left_leg",
+            joint_names=[
+                "l_hip_pitch",
+                "l_hip_roll",
+                "l_hip_yaw",
+                "l_knee",
+                "l_ankle_pitch",
+                "l_ankle_roll",
+            ],
+            joint_damping=[x * 5.0 for x in [10.0, 2.0, 2.0, 10.0, 10.0, 2.0]],
+            position_p_gains=[
+                x * 3.0 for x in [350.0, 70.0, 40.0, 200.0, 1000.0, 100.0]
+            ],
+            position_i_gains=[x * 0.0 for x in [0.17, 0.17, 0.35, 0.35, 0.35, 0.35]],
+            position_d_gains=[x * 20.0 for x in [0.15, 0.15, 0.35, 0.15, 0.15, 0.15]],
+            position_max_integral=[9999.0] * 6,
+            position_max_output=[9999.0] * 6,
+            position_max_error=[9999.0] * 6,
+            velocity_p_gains=[8.726, 8.726, 8.726, 8.726, 8.726, 8.726],
+            velocity_i_gains=[0.176, 0.176, 0.176, 0.176, 0.176, 0.176],
+            velocity_d_gains=[0.349, 0.349, 0.349, 0.349, 0.349, 0.349],
+            velocity_max_integral=[9999.0] * 6,
+            velocity_max_output=[9999.0] * 6,
+            velocity_max_error=[9999.0] * 6,
+            position_default_velocity=10.0 * math.pi / 180.0,
+            compliant_stiffness=[0.1, 0.1, 0.1, 0.1, 30.0, 30.0],
+            compliant_damping=[0.05, 0.05, 0.05, 0.05, 0.05, 0.05],
+            gearbox_ratios=[-100.0, 160.0, -100.0, -100.0, -100.00, -160.00],
+            motor_torque_constants=[1.0] * 6,
+            motor_current_noise_variance=[0.01] * 6,
+            motor_spring_stiffness=[0.0] * 6,
+            motor_max_currents=[9999.0] * 6,
+        ),
+        ControlBoard(
+            name="right_leg",
+            joint_names=[
+                "r_hip_pitch",
+                "r_hip_roll",
+                "r_hip_yaw",
+                "r_knee",
+                "r_ankle_pitch",
+                "r_ankle_roll",
+            ],
+            joint_damping=[x * 5.0 for x in [10.0, 2.0, 2.0, 10.0, 10.0, 2.0]],
+            position_p_gains=[
+                x * 3.0 for x in [350.0, 70.0, 40.0, 200.0, 1000.0, 100.0]
+            ],
+            position_i_gains=[x * 0.0 for x in [0.17, 0.17, 0.35, 0.35, 0.35, 0.35]],
+            position_d_gains=[x * 20.0 for x in [0.15, 0.15, 0.35, 0.15, 0.15, 0.15]],
+            position_max_integral=[9999.0] * 6,
+            position_max_output=[9999.0] * 6,
+            position_max_error=[9999.0] * 6,
+            velocity_p_gains=[8.726, 8.726, 8.726, 8.726, 8.726, 8.726],
+            velocity_i_gains=[0.176, 0.176, 0.176, 0.176, 0.176, 0.176],
+            velocity_d_gains=[0.349, 0.349, 0.349, 0.349, 0.349, 0.349],
+            velocity_max_integral=[9999.0] * 6,
+            velocity_max_output=[9999.0] * 6,
+            velocity_max_error=[9999.0] * 6,
+            position_default_velocity=10.0 * math.pi / 180.0,
+            compliant_stiffness=[0.1, 0.1, 0.1, 0.1, 30.0, 30.0],
+            compliant_damping=[0.05, 0.05, 0.05, 0.05, 0.05, 0.05],
+            gearbox_ratios=[100.00, -160.00, 100.0, 100.0, 100.0, 160.0],
+            motor_torque_constants=[1.0] * 6,
+            motor_current_noise_variance=[0.01] * 6,
+            motor_spring_stiffness=[0.0] * 6,
+            motor_max_currents=[9999.0] * 6,
+        ),
+        ControlBoard(
+            name="left_arm",
+            joint_names=[
+                "l_shoulder_pitch",
+                "l_shoulder_roll",
+                "l_shoulder_yaw",
+                "l_elbow",
+                "l_wrist_yaw",
+                "l_wrist_roll",
+                "l_wrist_pitch",
+            ],
+            joint_damping=[1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0],
+            position_p_gains=[5.745, 5.745, 5.745, 1.745, 1.745, 1.745, 1.745],
+            position_i_gains=[0.174, 0.174, 0.174, 0.174, 0.174, 0.174, 0.0],
+            position_d_gains=[0.174, 0.174, 0.174, 0.174, 0.174, 0.174, 0.0],
+            position_max_integral=[9999.0] * 7,
+            position_max_output=[9999.0] * 7,
+            position_max_error=[9999.0] * 7,
+            velocity_p_gains=[8.726, 8.726, 8.726, 5.236, 5.236, 5.236, 5.236],
+            velocity_i_gains=[0.002, 0.002, 0.002, 0.0, 0.0, 0.0, 0.0],
+            velocity_d_gains=[0.035, 0.035, 0.035, 0.002, 0.002, 0.002, 0.0],
+            velocity_max_integral=[9999.0] * 7,
+            velocity_max_output=[9999.0] * 7,
+            velocity_max_error=[9999.0] * 7,
+            position_default_velocity=10.0 * math.pi / 180.0,
+            compliant_stiffness=[0.3, 0.3, 0.2, 0.1, 0.0, 0.0, 0.0],
+            compliant_damping=[0.05, 0.05, 0.05, 0.05, 0.0, 0.0, 0.0],
+            gearbox_ratios=[100.0, 100.0, 100.0, -100.0, -392.0, -392.0, -392.0],
+            motor_torque_constants=[1.0] * 7,
+            motor_current_noise_variance=[0.01] * 7,
+            motor_spring_stiffness=[0.0] * 7,
+            motor_max_currents=[9999.0] * 7,
+        ),
+        ControlBoard(
+            name="right_arm",
+            joint_names=[
+                "r_shoulder_pitch",
+                "r_shoulder_roll",
+                "r_shoulder_yaw",
+                "r_elbow",
+                "r_wrist_yaw",
+                "r_wrist_roll",
+                "r_wrist_pitch",
+            ],
+            joint_damping=[1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0],
+            position_p_gains=[5.745, 5.745, 5.745, 1.745, 1.745, 1.745, 1.745],
+            position_i_gains=[0.174, 0.174, 0.174, 0.174, 0.174, 0.174, 0.0],
+            position_d_gains=[0.174, 0.174, 0.174, 0.174, 0.174, 0.174, 0.0],
+            position_max_integral=[9999.0] * 7,
+            position_max_output=[9999.0] * 7,
+            position_max_error=[9999.0] * 7,
+            velocity_p_gains=[8.726, 8.726, 8.726, 5.236, 5.236, 5.236, 5.236],
+            velocity_i_gains=[0.002, 0.002, 0.002, 0.0, 0.0, 0.0, 0.0],
+            velocity_d_gains=[0.035, 0.035, 0.035, 0.002, 0.002, 0.002, 0.0],
+            velocity_max_integral=[9999.0] * 7,
+            velocity_max_output=[9999.0] * 7,
+            velocity_max_error=[9999.0] * 7,
+            position_default_velocity=10.0 * math.pi / 180.0,
+            compliant_stiffness=[0.3, 0.3, 0.2, 0.1, 0.0, 0.0, 0.0],
+            compliant_damping=[0.05, 0.05, 0.05, 0.05, 0.0, 0.0, 0.0],
+            gearbox_ratios=[-100.0, -100.0, -100.0, 100.0, -392.0, -392.0, -392.0],
+            motor_torque_constants=[1.0] * 7,
+            motor_current_noise_variance=[0.01] * 7,
+            motor_spring_stiffness=[0.0] * 7,
+            motor_max_currents=[9999.0] * 7,
+        ),
+        ControlBoard(
+            name="left_hand",
+            joint_names=[
+                "l_thumb_add",
+                "l_thumb_prox",
+                "l_thumb_dist",
+                "l_index_add",
+                "l_index_prox",
+                "l_index_dist",
+                "l_middle_prox",
+                "l_middle_dist",
+                "l_ring_prox",
+                "l_ring_dist",
+                "l_pinkie_prox",
+                "l_pinkie_dist",
+            ],
+            joint_damping=[1.0] * 12,
+            position_p_gains=[5.0] * 12,
+            position_i_gains=[0.0] * 12,
+            position_d_gains=[0.0] * 12,
+            position_max_integral=[9999.0] * 12,
+            position_max_output=[9999.0] * 12,
+            position_max_error=[9999.0] * 12,
+            velocity_p_gains=[0.01] * 12,
+            velocity_i_gains=[0.0] * 12,
+            velocity_d_gains=[0.0] * 12,
+            velocity_max_integral=[9999.0] * 12,
+            velocity_max_output=[9999.0] * 12,
+            velocity_max_error=[9999.0] * 12,
+            position_default_velocity=10.0 * math.pi / 180.0,
+            compliant_stiffness=[0.0] * 12,
+            compliant_damping=[0.0] * 12,
+            gearbox_ratios=[159.0] * 12,
+            motor_torque_constants=[1.0] * 12,
+            motor_current_noise_variance=[0.01] * 12,
+            motor_spring_stiffness=[0.1] * 12,
+            motor_max_currents=[9999.0] * 12,
+        ),
+        ControlBoard(
+            name="right_hand",
+            joint_names=[
+                "r_thumb_add",
+                "r_thumb_prox",
+                "r_thumb_dist",
+                "r_index_add",
+                "r_index_prox",
+                "r_index_dist",
+                "r_middle_prox",
+                "r_middle_dist",
+                "r_ring_prox",
+                "r_ring_dist",
+                "r_pinkie_prox",
+                "r_pinkie_dist",
+            ],
+            joint_damping=[1.0] * 12,
+            position_p_gains=[5.0] * 12,
+            position_i_gains=[0.0] * 12,
+            position_d_gains=[0.0] * 12,
+            position_max_integral=[9999.0] * 12,
+            position_max_output=[9999.0] * 12,
+            position_max_error=[9999.0] * 12,
+            velocity_p_gains=[0.01] * 12,
+            velocity_i_gains=[0.0] * 12,
+            velocity_d_gains=[0.0] * 12,
+            velocity_max_integral=[9999.0] * 12,
+            velocity_max_output=[9999.0] * 12,
+            velocity_max_error=[9999.0] * 12,
+            position_default_velocity=10.0 * math.pi / 180.0,
+            compliant_stiffness=[0.0] * 12,
+            compliant_damping=[0.0] * 12,
+            gearbox_ratios=[159.0] * 12,
+            motor_torque_constants=[1.0] * 12,
+            motor_current_noise_variance=[0.01] * 12,
+            motor_spring_stiffness=[0.1] * 12,
+            motor_max_currents=[9999.0] * 12,
+        ),
+    ],
     imus=[
         # The name of the imu is also the frameId
         Imu(name="waist_imu_0", target=robot_path + "/torso_1/waist_imu_0_sensor"),
@@ -901,18 +1280,20 @@ s = Settings(
             flip=False,
         ),
     ],
+    sim_frequency=100.0,  # Simulation frequency in Hz (set to None to keep default)
 )
 
 #######################################################################################
 #######################################################################################
 #######################################################################################
 
+set_sim_frequency(s.sim_frequency)
 keys = og.Controller.Keys
 create_graph(
     [
-        add_basic_nodes(keys),
-        add_ros2_clock_publisher(keys),
-        add_ros2_joint_compound(keys, s),
+        create_basic_nodes(keys, s),
+        create_ros2_clock_publisher(keys),
+        create_control_board_compounds(keys, s),
         create_imu_compounds(keys, s),
         create_camera_compounds(keys, s),
         create_ft_compounds(keys, s),
