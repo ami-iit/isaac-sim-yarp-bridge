@@ -43,7 +43,7 @@ class yarp::dev::IsaacSimMultipleAnalogSensorsNWCROS2 :
     public yarp::dev::ILinearVelocitySensors
 {
 
-    bool waitForData();
+    bool waitForData(double timeout);
 
 public:
     IsaacSimMultipleAnalogSensorsNWCROS2() = default;

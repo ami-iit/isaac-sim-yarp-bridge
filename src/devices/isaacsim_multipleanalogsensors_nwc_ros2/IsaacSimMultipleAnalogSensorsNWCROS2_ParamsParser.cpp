@@ -8,7 +8,7 @@
 // This is an automatically generated file. Please do not edit it.
 // It will be re-generated if the cmake flag ALLOW_DEVICE_PARAM_PARSER_GERNERATION is ON.
 
-// Generated on: Thu Aug 28 14:20:51 2025
+// Generated on: Fri Nov 21 12:42:48 2025
 
 
 #include "IsaacSimMultipleAnalogSensorsNWCROS2_ParamsParser.h"
@@ -31,6 +31,7 @@ std::vector<std::string> IsaacSimMultipleAnalogSensorsNWCROS2_ParamsParser::getL
     params.push_back("node_name");
     params.push_back("ft_topic_names");
     params.push_back("imu_topic_names");
+    params.push_back("init_wait_time");
     return params;
 }
 
@@ -49,6 +50,11 @@ bool IsaacSimMultipleAnalogSensorsNWCROS2_ParamsParser::getParamValue(const std:
     if (paramName =="imu_topic_names")
     {
         return false;
+    }
+    if (paramName =="init_wait_time")
+    {
+        paramValue = std::to_string(m_init_wait_time);
+        return true;
     }
 
     yError() <<"parameter '" << paramName << "' was not found";
@@ -153,6 +159,20 @@ bool      IsaacSimMultipleAnalogSensorsNWCROS2_ParamsParser::parseParams(const y
         prop_check.unput("imu_topic_names");
     }
 
+    //Parser of parameter init_wait_time
+    {
+        if (config.check("init_wait_time"))
+        {
+            m_init_wait_time = config.find("init_wait_time").asFloat64();
+            yCInfo(IsaacSimMultipleAnalogSensorsNWCROS2ParamsCOMPONENT) << "Parameter 'init_wait_time' using value:" << m_init_wait_time;
+        }
+        else
+        {
+            yCInfo(IsaacSimMultipleAnalogSensorsNWCROS2ParamsCOMPONENT) << "Parameter 'init_wait_time' using DEFAULT value:" << m_init_wait_time;
+        }
+        prop_check.unput("init_wait_time");
+    }
+
     /*
     //This code check if the user set some parameter which are not check by the parser
     //If the parser is set in strict mode, this will generate an error
@@ -192,9 +212,10 @@ std::string      IsaacSimMultipleAnalogSensorsNWCROS2_ParamsParser::getDocumenta
     doc = doc + std::string("'node_name': Set the name for ROS node\n");
     doc = doc + std::string("'ft_topic_names': Specify the name of the FT topics to connect\n");
     doc = doc + std::string("'imu_topic_names': Specify the name of the IMU topics to connect\n");
+    doc = doc + std::string("'init_wait_time': Timeout to wait for data on opening\n");
     doc = doc + std::string("\n");
     doc = doc + std::string("Here are some examples of invocation command with yarpdev, with all params:\n");
-    doc = doc + " yarpdev --device IsaacSimMultipleAnalogSensorsNWCROS2 --node_name MASBridgeSubscriber --ft_topic_names <mandatory_value> --imu_topic_names <mandatory_value>\n";
+    doc = doc + " yarpdev --device IsaacSimMultipleAnalogSensorsNWCROS2 --node_name MASBridgeSubscriber --ft_topic_names <mandatory_value> --imu_topic_names <mandatory_value> --init_wait_time 10.0\n";
     doc = doc + std::string("Using only mandatory params:\n");
     doc = doc + " yarpdev --device IsaacSimMultipleAnalogSensorsNWCROS2 --ft_topic_names <mandatory_value> --imu_topic_names <mandatory_value>\n";
     doc = doc + std::string("=============================================\n\n");    return doc;
