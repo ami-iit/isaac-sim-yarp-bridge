@@ -26,6 +26,16 @@
         <xi:include href="wrappers/FT/right_leg_hip-FT_wrapper.xml" />
         <xi:include href="wrappers/FT/right_leg-FT_remapper.xml" />
         <xi:include href="wrappers/FT/right_leg-FT_wrapper.xml" />
+
+        <!-- INERTIALS -->
+        <xi:include href="bridge/inertials/head-inertials_isaacsim.xml" />
+        <xi:include href="bridge/inertials/waist-inertials_isaacsim.xml" />
+
+        <xi:include href="wrappers/inertials/alljoints-inertials_remapper.xml" />
+        <xi:include href="wrappers/inertials/alljoints-inertials_wrapper.xml" />
+        <xi:include href="wrappers/inertials/head-inertials_wrapper.xml" />
+        <xi:include href="wrappers/inertials/waist-inertials_wrapper.xml" />
+
     </devices>
 
 </robot>
