@@ -4613,9 +4613,9 @@ bool yarp::dev::IsaacSimControlBoardNWCROS2::setup()
     auto result = m_node->getParameters({ {joint_names_tag, Type::PARAMETER_STRING_ARRAY},
                                           {joint_types_tag, Type::PARAMETER_INTEGER_ARRAY},
                                           {compliant_modes_tag, Type::PARAMETER_BOOL_ARRAY} });
-    if (result.size() != 2)
+    if (result.size() != 3)
     {
-        yCError(CB) << errorPrefix << "Error while getting joint names and types.";
+        yCError(CB) << errorPrefix << "Error while getting joint names, types, and compliant modes.";
         m_ready = false;
         return m_ready;
     }
