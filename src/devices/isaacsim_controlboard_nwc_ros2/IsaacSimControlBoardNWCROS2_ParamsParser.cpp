@@ -8,7 +8,7 @@
 // This is an automatically generated file. Please do not edit it.
 // It will be re-generated if the cmake flag ALLOW_DEVICE_PARAM_PARSER_GERNERATION is ON.
 
-// Generated on: Fri Sep 26 16:25:53 2025
+// Generated on: Mon Dec  1 16:06:02 2025
 
 
 #include "IsaacSimControlBoardNWCROS2_ParamsParser.h"
@@ -28,7 +28,8 @@ IsaacSimControlBoardNWCROS2_ParamsParser::IsaacSimControlBoardNWCROS2_ParamsPars
 std::vector<std::string> IsaacSimControlBoardNWCROS2_ParamsParser::getListOfParams() const
 {
     std::vector<std::string> params;
-    params.push_back("node_name");
+    params.push_back("streaming_node_name");
+    params.push_back("service_node_name");
     params.push_back("joint_state_topic_name");
     params.push_back("motor_state_topic_name");
     params.push_back("joint_references_topic_name");
@@ -41,9 +42,14 @@ std::vector<std::string> IsaacSimControlBoardNWCROS2_ParamsParser::getListOfPara
 
 bool IsaacSimControlBoardNWCROS2_ParamsParser::getParamValue(const std::string& paramName, std::string& paramValue) const
 {
-    if (paramName =="node_name")
+    if (paramName =="streaming_node_name")
     {
-        paramValue = m_node_name;
+        paramValue = m_streaming_node_name;
+        return true;
+    }
+    if (paramName =="service_node_name")
+    {
+        paramValue = m_service_node_name;
         return true;
     }
     if (paramName =="joint_state_topic_name")
@@ -103,18 +109,32 @@ bool      IsaacSimControlBoardNWCROS2_ParamsParser::parseParams(const yarp::os::
 
     m_provided_configuration = config.toString();
     yarp::os::Property prop_check(m_provided_configuration.c_str());
-    //Parser of parameter node_name
+    //Parser of parameter streaming_node_name
     {
-        if (config.check("node_name"))
+        if (config.check("streaming_node_name"))
         {
-            m_node_name = config.find("node_name").asString();
-            yCInfo(IsaacSimControlBoardNWCROS2ParamsCOMPONENT) << "Parameter 'node_name' using value:" << m_node_name;
+            m_streaming_node_name = config.find("streaming_node_name").asString();
+            yCInfo(IsaacSimControlBoardNWCROS2ParamsCOMPONENT) << "Parameter 'streaming_node_name' using value:" << m_streaming_node_name;
         }
         else
         {
-            yCInfo(IsaacSimControlBoardNWCROS2ParamsCOMPONENT) << "Parameter 'node_name' using DEFAULT value:" << m_node_name;
+            yCInfo(IsaacSimControlBoardNWCROS2ParamsCOMPONENT) << "Parameter 'streaming_node_name' using DEFAULT value:" << m_streaming_node_name;
         }
-        prop_check.unput("node_name");
+        prop_check.unput("streaming_node_name");
+    }
+
+    //Parser of parameter service_node_name
+    {
+        if (config.check("service_node_name"))
+        {
+            m_service_node_name = config.find("service_node_name").asString();
+            yCInfo(IsaacSimControlBoardNWCROS2ParamsCOMPONENT) << "Parameter 'service_node_name' using value:" << m_service_node_name;
+        }
+        else
+        {
+            yCInfo(IsaacSimControlBoardNWCROS2ParamsCOMPONENT) << "Parameter 'service_node_name' using DEFAULT value:" << m_service_node_name;
+        }
+        prop_check.unput("service_node_name");
     }
 
     //Parser of parameter joint_state_topic_name
@@ -247,7 +267,8 @@ std::string      IsaacSimControlBoardNWCROS2_ParamsParser::getDocumentationOfDev
     doc = doc + std::string("This is the help for device: IsaacSimControlBoardNWCROS2\n");
     doc = doc + std::string("\n");
     doc = doc + std::string("This is the list of the parameters accepted by the device:\n");
-    doc = doc + std::string("'node_name': Set the name for ROS node\n");
+    doc = doc + std::string("'streaming_node_name': Set the name for the ROS node streaming and receiving the state\n");
+    doc = doc + std::string("'service_node_name': Set the name for the ROS node connecting to the services\n");
     doc = doc + std::string("'joint_state_topic_name': Specify the name of the joint state topic to connect\n");
     doc = doc + std::string("'motor_state_topic_name': Specify the name of the motor state topic to connect\n");
     doc = doc + std::string("'joint_references_topic_name': Specify the name of the topic to open to publish the joint references\n");
@@ -256,7 +277,7 @@ std::string      IsaacSimControlBoardNWCROS2_ParamsParser::getDocumentationOfDev
     doc = doc + std::string("'service_request_timeout': Specify the timeout value for getting and setting parameters\n");
     doc = doc + std::string("\n");
     doc = doc + std::string("Here are some examples of invocation command with yarpdev, with all params:\n");
-    doc = doc + " yarpdev --device IsaacSimControlBoardNWCROS2 --node_name ControlBoardBridgeSubscriber --joint_state_topic_name <mandatory_value> --motor_state_topic_name <mandatory_value> --joint_references_topic_name <mandatory_value> --get_parameters_service_name <mandatory_value> --set_parameters_service_name <mandatory_value> --service_request_timeout 0.5\n";
+    doc = doc + " yarpdev --device IsaacSimControlBoardNWCROS2 --streaming_node_name ControlBoardBridgeStreaming --service_node_name ControlBoardBridgeService --joint_state_topic_name <mandatory_value> --motor_state_topic_name <mandatory_value> --joint_references_topic_name <mandatory_value> --get_parameters_service_name <mandatory_value> --set_parameters_service_name <mandatory_value> --service_request_timeout 0.5\n";
     doc = doc + std::string("Using only mandatory params:\n");
     doc = doc + " yarpdev --device IsaacSimControlBoardNWCROS2 --joint_state_topic_name <mandatory_value> --motor_state_topic_name <mandatory_value> --joint_references_topic_name <mandatory_value> --get_parameters_service_name <mandatory_value> --set_parameters_service_name <mandatory_value>\n";
     doc = doc + std::string("=============================================\n\n");    return doc;

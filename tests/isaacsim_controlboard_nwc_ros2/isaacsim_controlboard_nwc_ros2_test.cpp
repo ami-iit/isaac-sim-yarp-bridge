@@ -97,7 +97,8 @@ TEST_CASE("IsaacSimControlBoardNWCROS2 device open/close", "[ros2][isaacsim_cont
 
     yarp::dev::IsaacSimControlBoardNWCROS2 device;
     yarp::os::Property config;
-    config.put("node_name", "test_isaacsim_controlboard");
+    config.put("streaming_node_name", "test_isaacsim_controlboard_streaming");
+    config.put("service_node_name", "test_isaacsim_controlboard_service");
     config.put("joint_state_topic_name", "/joint_states");
     config.put("motor_state_topic_name", "/motor_states");
     config.put("joint_references_topic_name", "/joint_references");

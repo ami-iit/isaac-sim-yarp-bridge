@@ -90,12 +90,12 @@ bool yarp::dev::IsaacSimControlBoardNWCROS2::open(yarp::os::Searchable& config)
             rclcpp::init(0, nullptr);
         }
 
-        m_streamingNode = std::make_shared<CBStreamingNode>(m_paramsParser.m_node_name + "_streaming",
+        m_streamingNode = std::make_shared<CBStreamingNode>(m_paramsParser.m_streaming_node_name,
                                                             m_paramsParser.m_joint_state_topic_name,
                                                             m_paramsParser.m_motor_state_topic_name,
                                                             m_paramsParser.m_joint_references_topic_name,
                                                             this);
-        m_serviceNode = std::make_shared<CBServiceNode>(m_paramsParser.m_node_name + "_service",
+        m_serviceNode = std::make_shared<CBServiceNode>(m_paramsParser.m_service_node_name,
                                                         m_paramsParser.m_get_parameters_service_name,
                                                         m_paramsParser.m_set_parameters_service_name,
                                                         m_paramsParser.m_service_request_timeout);
