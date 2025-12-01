@@ -90,16 +90,18 @@ bool yarp::dev::IsaacSimControlBoardNWCROS2::open(yarp::os::Searchable& config)
             rclcpp::init(0, nullptr);
         }
 
-        m_node = std::make_shared<CBNode>(m_paramsParser.m_node_name,
-                                          m_paramsParser.m_joint_state_topic_name,
-                                          m_paramsParser.m_motor_state_topic_name,
-                                          m_paramsParser.m_joint_references_topic_name,
-                                          m_paramsParser.m_get_parameters_service_name,
-                                          m_paramsParser.m_set_parameters_service_name,
-                                          m_paramsParser.m_service_request_timeout,
-                                          this);
+        m_streamingNode = std::make_shared<CBStreamingNode>(m_paramsParser.m_node_name + "_streaming",
+                                                            m_paramsParser.m_joint_state_topic_name,
+                                                            m_paramsParser.m_motor_state_topic_name,
+                                                            m_paramsParser.m_joint_references_topic_name,
+                                                            this);
+        m_serviceNode = std::make_shared<CBServiceNode>(m_paramsParser.m_node_name + "_service",
+                                                        m_paramsParser.m_get_parameters_service_name,
+                                                        m_paramsParser.m_set_parameters_service_name,
+                                                        m_paramsParser.m_service_request_timeout);
+
         m_executor = std::make_unique<rclcpp::executors::MultiThreadedExecutor>();
-        m_executor->add_node(m_node);
+        m_executor->add_node(m_streamingNode);
         m_executorThread = std::thread([this]() { m_executor->spin(); });
     }
     return setup();
@@ -108,11 +110,15 @@ bool yarp::dev::IsaacSimControlBoardNWCROS2::open(yarp::os::Searchable& config)
 bool yarp::dev::IsaacSimControlBoardNWCROS2::close()
 {
     std::lock_guard<std::mutex> lock(m_mutex);
-    if (m_node)
+    if (m_streamingNode)
     {
         m_executor->cancel();
         m_executorThread.join();
-        m_node.reset();
+        m_streamingNode.reset();
+    }
+    if (m_serviceNode)
+    {
+        m_serviceNode.reset();
     }
     m_ready = false;
     return true;
@@ -422,7 +428,7 @@ bool yarp::dev::IsaacSimControlBoardNWCROS2::setPidReference(const yarp::dev::Pi
         m_jointReferences.valid = true;
     }
 
-    m_node->publishReferences(m_jointReferences);
+    m_streamingNode->publishReferences(m_jointReferences);
     return true;
 }
 
@@ -466,7 +472,7 @@ bool yarp::dev::IsaacSimControlBoardNWCROS2::setPidReferences(const yarp::dev::P
         }
         m_jointReferences.valid = true;
     }
-    m_node->publishReferences(m_jointReferences);
+    m_streamingNode->publishReferences(m_jointReferences);
     return true;
 }
 
@@ -1532,7 +1538,7 @@ bool yarp::dev::IsaacSimControlBoardNWCROS2::positionMove(int j, double ref)
         m_jointReferences.valid = true;
     }
 
-    m_node->publishReferences(m_jointReferences);
+    m_streamingNode->publishReferences(m_jointReferences);
     return true;
 }
 
@@ -1558,7 +1564,7 @@ bool yarp::dev::IsaacSimControlBoardNWCROS2::positionMove(const double* refs)
         }
         m_jointReferences.valid = true;
     }
-    m_node->publishReferences(m_jointReferences);
+    m_streamingNode->publishReferences(m_jointReferences);
     return true;
 }
 
@@ -1590,7 +1596,7 @@ bool yarp::dev::IsaacSimControlBoardNWCROS2::positionMove(const int n_joints, co
         }
         m_jointReferences.valid = true;
     }
-    m_node->publishReferences(m_jointReferences);
+    m_streamingNode->publishReferences(m_jointReferences);
     return true;
 }
 
@@ -1710,7 +1716,7 @@ bool yarp::dev::IsaacSimControlBoardNWCROS2::relativeMove(int j, double delta)
         }
         m_jointReferences.valid = true;
     }
-    m_node->publishReferences(m_jointReferences);
+    m_streamingNode->publishReferences(m_jointReferences);
     return true;
 }
 
@@ -1742,7 +1748,7 @@ bool yarp::dev::IsaacSimControlBoardNWCROS2::relativeMove(const double* deltas)
         }
         m_jointReferences.valid = true;
     }
-    m_node->publishReferences(m_jointReferences);
+    m_streamingNode->publishReferences(m_jointReferences);
     return true;
 }
 
@@ -1780,7 +1786,7 @@ bool yarp::dev::IsaacSimControlBoardNWCROS2::relativeMove(const int n_joints, co
         }
         m_jointReferences.valid = true;
     }
-    m_node->publishReferences(m_jointReferences);
+    m_streamingNode->publishReferences(m_jointReferences);
     return true;
 }
 
@@ -2212,7 +2218,7 @@ bool yarp::dev::IsaacSimControlBoardNWCROS2::velocityMove(int j, double v)
         m_jointReferences.velocity[j] = v;
         m_jointReferences.valid = true;
     }
-    m_node->publishReferences(m_jointReferences);
+    m_streamingNode->publishReferences(m_jointReferences);
     return true;
 }
 
@@ -2234,7 +2240,7 @@ bool yarp::dev::IsaacSimControlBoardNWCROS2::velocityMove(const double* v)
         }
         m_jointReferences.valid = true;
     }
-    m_node->publishReferences(m_jointReferences);
+    m_streamingNode->publishReferences(m_jointReferences);
     return true;
 }
 
@@ -3011,7 +3017,7 @@ bool yarp::dev::IsaacSimControlBoardNWCROS2::homingSingleJoint(int j)
 
         m_jointReferences.valid = true;
     }
-    m_node->publishReferences(m_jointReferences);
+    m_streamingNode->publishReferences(m_jointReferences);
     return true;
 }
 
@@ -3046,7 +3052,7 @@ bool yarp::dev::IsaacSimControlBoardNWCROS2::homingWholePart()
         }
         m_jointReferences.valid = true;
     }
-    m_node->publishReferences(m_jointReferences);
+    m_streamingNode->publishReferences(m_jointReferences);
 
     return true;
 }
@@ -3313,7 +3319,7 @@ bool yarp::dev::IsaacSimControlBoardNWCROS2::setRefTorques(const double* t)
         std::copy(t, t + numberOfJoints, m_jointReferences.effort.begin());
         m_jointReferences.valid = true;
     }
-    m_node->publishReferences(m_jointReferences);
+    m_streamingNode->publishReferences(m_jointReferences);
     return true;
 }
 
@@ -3336,7 +3342,7 @@ bool yarp::dev::IsaacSimControlBoardNWCROS2::setRefTorque(int j, double t)
         m_jointReferences.effort[j] = t;
         m_jointReferences.valid = true;
     }
-    m_node->publishReferences(m_jointReferences);
+    m_streamingNode->publishReferences(m_jointReferences);
     return true;
 }
 
@@ -3364,7 +3370,7 @@ bool yarp::dev::IsaacSimControlBoardNWCROS2::setRefTorques(const int n_joint, co
         }
         m_jointReferences.valid = true;
     }
-    m_node->publishReferences(m_jointReferences);
+    m_streamingNode->publishReferences(m_jointReferences);
     return true;
 }
 
@@ -3830,7 +3836,7 @@ bool yarp::dev::IsaacSimControlBoardNWCROS2::setPosition(int j, double ref)
         }
         m_jointReferences.valid = true;
     }
-    m_node->publishReferences(m_jointReferences);
+    m_streamingNode->publishReferences(m_jointReferences);
     return true;
 }
 
@@ -3862,7 +3868,7 @@ bool yarp::dev::IsaacSimControlBoardNWCROS2::setPositions(const int n_joints, co
         }
         m_jointReferences.valid = true;
     }
-    m_node->publishReferences(m_jointReferences);
+    m_streamingNode->publishReferences(m_jointReferences);
     return true;
 }
 
@@ -3888,7 +3894,7 @@ bool yarp::dev::IsaacSimControlBoardNWCROS2::setPositions(const double* refs)
         }
         m_jointReferences.valid = true;
     }
-    m_node->publishReferences(m_jointReferences);
+    m_streamingNode->publishReferences(m_jointReferences);
     return true;
 }
 
@@ -4020,7 +4026,7 @@ bool yarp::dev::IsaacSimControlBoardNWCROS2::velocityMove(const int n_joints, co
         }
         m_jointReferences.valid = true;
     }
-    m_node->publishReferences(m_jointReferences);
+    m_streamingNode->publishReferences(m_jointReferences);
     return true;
 
 }
@@ -4490,7 +4496,7 @@ bool yarp::dev::IsaacSimControlBoardNWCROS2::setRefCurrents(const double* currs)
         }
         m_jointReferences.valid = true;
     }
-    m_node->publishReferences(m_jointReferences);
+    m_streamingNode->publishReferences(m_jointReferences);
     return true;
 }
 
@@ -4513,7 +4519,7 @@ bool yarp::dev::IsaacSimControlBoardNWCROS2::setRefCurrent(int m, double curr)
         m_jointReferences.effort[m] = curr;
         m_jointReferences.valid = true;
     }
-    m_node->publishReferences(m_jointReferences);
+    m_streamingNode->publishReferences(m_jointReferences);
     return true;
 }
 
@@ -4541,7 +4547,7 @@ bool yarp::dev::IsaacSimControlBoardNWCROS2::setRefCurrents(const int n_motor, c
         }
         m_jointReferences.valid = true;
     }
-    m_node->publishReferences(m_jointReferences);
+    m_streamingNode->publishReferences(m_jointReferences);
     return true;
 }
 
@@ -4600,7 +4606,7 @@ bool yarp::dev::IsaacSimControlBoardNWCROS2::setup()
 
     std::string errorPrefix = "[setup] ";
 
-    if (!m_node->waitServicesAvailable())
+    if (!m_serviceNode->waitServicesAvailable())
     {
         yCError(CB) << errorPrefix << "Not all services are available.";
         m_ready = false;
@@ -4757,14 +4763,11 @@ void yarp::dev::IsaacSimControlBoardNWCROS2::JointsState::invalidate()
     valid = false;
 }
 
-yarp::dev::IsaacSimControlBoardNWCROS2::CBNode::CBNode(const std::string& node_name,
-                                                       const std::string& joint_state_topic_name,
-                                                       const std::string& motor_state_topic_name,
-                                                       const std::string& joint_references_topic_name,
-                                                       const std::string& get_param_service_name,
-                                                       const std::string& set_param_service_name,
-                                                       double requests_timeout_sec,
-                                                       IsaacSimControlBoardNWCROS2* parent)
+yarp::dev::IsaacSimControlBoardNWCROS2::CBStreamingNode::CBStreamingNode(const std::string& node_name,
+                                                                         const std::string& joint_state_topic_name,
+                                                                         const std::string& motor_state_topic_name,
+                                                                         const std::string& joint_references_topic_name,
+                                                                         IsaacSimControlBoardNWCROS2* parent)
 : rclcpp::Node(node_name)
 {
     m_jointStateSubscription = this->create_subscription<sensor_msgs::msg::JointState>(
@@ -4778,6 +4781,27 @@ yarp::dev::IsaacSimControlBoardNWCROS2::CBNode::CBNode(const std::string& node_n
         parent->updateMotorMeasurements(msg);
     });
     m_referencesPublisher = this->create_publisher<sensor_msgs::msg::JointState>(joint_references_topic_name, 10);
+}
+
+void yarp::dev::IsaacSimControlBoardNWCROS2::CBStreamingNode::publishReferences(JointsState& msg)
+{
+    if (!msg.valid.load())
+    {
+        return;
+    }
+    std::lock_guard<std::mutex> lock(msg.mutex);
+    msg.convert_to_msg(m_referencesMessageBuffer);
+    m_referencesMessageBuffer.header.stamp = this->now();
+    m_referencesPublisher->publish(m_referencesMessageBuffer);
+    msg.invalidate();
+}
+
+yarp::dev::IsaacSimControlBoardNWCROS2::CBServiceNode::CBServiceNode(const std::string& node_name,
+                                                                     const std::string& get_param_service_name,
+                                                                     const std::string& set_param_service_name,
+                                                                     double requests_timeout_sec)
+    : rclcpp::Node(node_name)
+{
     getParamClient = this->create_client<rcl_interfaces::srv::GetParameters>(get_param_service_name);
     setParamClient = this->create_client<rcl_interfaces::srv::SetParameters>(set_param_service_name);
 
@@ -4794,9 +4818,9 @@ std::vector<rcl_interfaces::msg::ParameterValue> yarp::dev::IsaacSimControlBoard
         get_request->names[i] = parameters[i].first;
     }
 
-    auto future = m_node->getParamClient->async_send_request(get_request);
+    auto future = m_serviceNode->getParamClient->async_send_request(get_request);
 
-    if (rclcpp::spin_until_future_complete(m_node, future, m_node->requestsTimeout) != rclcpp::FutureReturnCode::SUCCESS)
+    if (rclcpp::spin_until_future_complete(m_serviceNode, future, m_serviceNode->requestsTimeout) != rclcpp::FutureReturnCode::SUCCESS)
     {
         yCError(CB) << errorPrefix << "Service call timed out";
         return std::vector<rcl_interfaces::msg::ParameterValue>();
@@ -4810,7 +4834,7 @@ std::vector<rcl_interfaces::msg::ParameterValue> yarp::dev::IsaacSimControlBoard
         return std::vector<rcl_interfaces::msg::ParameterValue>();
     }
 
-    const auto& values = future.get()->values;
+    const auto& values = response->values;
     if (values.size() != parameters.size())
     {
         yCError(CB) << errorPrefix << "Unexpected number of results. Expected" << parameters.size() << "but got" << values.size();
@@ -4839,8 +4863,8 @@ std::vector<rcl_interfaces::msg::SetParametersResult> yarp::dev::IsaacSimControl
 {
     auto set_request = std::make_shared<rcl_interfaces::srv::SetParameters::Request>();
     set_request->parameters = params;
-    auto future = m_node->setParamClient->async_send_request(set_request);
-    if (rclcpp::spin_until_future_complete(m_node, future, m_node->requestsTimeout) != rclcpp::FutureReturnCode::SUCCESS)
+    auto future = m_serviceNode->setParamClient->async_send_request(set_request);
+    if (rclcpp::spin_until_future_complete(m_serviceNode, future, m_serviceNode->requestsTimeout) != rclcpp::FutureReturnCode::SUCCESS)
     {
         yCError(CB) << "[setParameters] Service call timed out";
         return std::vector<rcl_interfaces::msg::SetParametersResult>();
@@ -4857,20 +4881,7 @@ std::vector<rcl_interfaces::msg::SetParametersResult> yarp::dev::IsaacSimControl
     return response->results;
 }
 
-void yarp::dev::IsaacSimControlBoardNWCROS2::CBNode::publishReferences(JointsState& msg)
-{
-    if (!msg.valid.load())
-    {
-        return;
-    }
-    std::lock_guard<std::mutex> lock(msg.mutex);
-    msg.convert_to_msg(m_referencesMessageBuffer);
-    m_referencesMessageBuffer.header.stamp = this->now();
-    m_referencesPublisher->publish(m_referencesMessageBuffer);
-    msg.invalidate();
-}
-
-bool yarp::dev::IsaacSimControlBoardNWCROS2::CBNode::waitServicesAvailable()
+bool yarp::dev::IsaacSimControlBoardNWCROS2::CBServiceNode::waitServicesAvailable()
 {
     return getParamClient->wait_for_service(requestsTimeout * 10) &&
            setParamClient->wait_for_service(requestsTimeout * 10);

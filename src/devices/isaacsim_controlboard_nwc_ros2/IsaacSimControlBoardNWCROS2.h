@@ -475,25 +475,16 @@ private:
         void invalidate();
     };
 
-    class CBNode : public rclcpp::Node
+    class CBStreamingNode : public rclcpp::Node
     {
     public:
-        explicit CBNode(const std::string& node_name,
-                        const std::string& joint_state_topic_name,
-                        const std::string& motor_state_topic_name,
-                        const std::string& joint_references_topic_name,
-                        const std::string& get_param_service_name,
-                        const std::string& set_param_service_name,
-                        double requests_timeout_sec,
-                        IsaacSimControlBoardNWCROS2* parent);
+        explicit CBStreamingNode(const std::string& node_name,
+                                 const std::string& joint_state_topic_name,
+                                 const std::string& motor_state_topic_name,
+                                 const std::string& joint_references_topic_name,
+                                 IsaacSimControlBoardNWCROS2* parent);
 
         void publishReferences(JointsState& msg);
-
-        bool waitServicesAvailable();
-
-        rclcpp::Client<rcl_interfaces::srv::GetParameters>::SharedPtr getParamClient;
-        rclcpp::Client<rcl_interfaces::srv::SetParameters>::SharedPtr setParamClient;
-        std::chrono::duration<double> requestsTimeout;
 
     private:
         rclcpp::Subscription<sensor_msgs::msg::JointState>::SharedPtr m_jointStateSubscription;
@@ -502,7 +493,23 @@ private:
         sensor_msgs::msg::JointState m_referencesMessageBuffer;
     };
 
-    std::shared_ptr<CBNode> m_node;
+    class CBServiceNode : public rclcpp::Node
+    {
+    public:
+        explicit CBServiceNode(const std::string& node_name,
+                               const std::string& get_param_service_name,
+                               const std::string& set_param_service_name,
+                               double requests_timeout_sec);
+
+        bool waitServicesAvailable();
+
+        rclcpp::Client<rcl_interfaces::srv::GetParameters>::SharedPtr getParamClient;
+        rclcpp::Client<rcl_interfaces::srv::SetParameters>::SharedPtr setParamClient;
+        std::chrono::duration<double> requestsTimeout;
+    };
+
+    std::shared_ptr<CBStreamingNode> m_streamingNode;
+    std::shared_ptr<CBServiceNode> m_serviceNode;
     std::unique_ptr<rclcpp::executors::MultiThreadedExecutor> m_executor;
     std::mutex m_mutex;
     std::thread m_executorThread;
