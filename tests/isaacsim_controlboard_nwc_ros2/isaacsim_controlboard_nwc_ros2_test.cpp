@@ -1,4 +1,5 @@
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/catch_approx.hpp>
 #include <rclcpp/rclcpp.hpp>
 #include <sensor_msgs/msg/joint_state.hpp>
 #include <rcl_interfaces/srv/get_parameters.hpp>
@@ -11,59 +12,73 @@
 #include <thread>
 #include <memory>
 #include <chrono>
+#include <cmath>
 
 using namespace std::chrono_literals;
 
-class DummyCBNode : public rclcpp::Node {
+class DummyCBNode : public rclcpp::Node
+{
 public:
-    DummyCBNode(const std::string& node_name,
-        const std::string& joint_state_topic,
-        const std::string& motor_state_topic,
-        const std::string& joint_references_topic,
-        const std::string& get_param_service,
-        const std::string& set_param_service)
+    DummyCBNode(const std::string &node_name,
+                const std::string &joint_state_topic,
+                const std::string &motor_state_topic,
+                const std::string &joint_references_topic,
+                const std::string &get_param_service,
+                const std::string &set_param_service)
         : Node(node_name)
     {
         joint_state_pub = this->create_publisher<sensor_msgs::msg::JointState>(joint_state_topic, 10);
         motor_state_pub = this->create_publisher<sensor_msgs::msg::JointState>(motor_state_topic, 10);
         joint_references_sub = this->create_subscription<sensor_msgs::msg::JointState>(
             joint_references_topic, 10,
-            [](const sensor_msgs::msg::JointState::SharedPtr) { /* do nothing */ });
+            [this](const sensor_msgs::msg::JointState::SharedPtr msg)
+            {
+                std::lock_guard<std::mutex> lock(joint_references_mutex);
+                last_joint_references = *msg;
+                joint_references_received = true;
+            });
 
         get_param_srv = this->create_service<rcl_interfaces::srv::GetParameters>(
             get_param_service,
             [](const std::shared_ptr<rcl_interfaces::srv::GetParameters::Request> request,
-                std::shared_ptr<rcl_interfaces::srv::GetParameters::Response> response) {
-            // Return dummy values for required parameters
-            response->values.resize(request->names.size());
-            for (size_t i = 0; i < request->names.size(); ++i) {
-                if (request->names[i] == "joint_names") {
-                    response->values[i].type = rcl_interfaces::msg::ParameterType::PARAMETER_STRING_ARRAY;
-                    response->values[i].string_array_value = { "joint_1", "joint_2", "joint_3" };
+               std::shared_ptr<rcl_interfaces::srv::GetParameters::Response> response)
+            {
+                // Return dummy values for required parameters
+                response->values.resize(request->names.size());
+                for (size_t i = 0; i < request->names.size(); ++i)
+                {
+                    if (request->names[i] == "joint_names")
+                    {
+                        response->values[i].type = rcl_interfaces::msg::ParameterType::PARAMETER_STRING_ARRAY;
+                        response->values[i].string_array_value = {"joint_1", "joint_2", "joint_3"};
+                    }
+                    else if (request->names[i] == "joint_types")
+                    {
+                        response->values[i].type = rcl_interfaces::msg::ParameterType::PARAMETER_INTEGER_ARRAY;
+                        // 0: revolute, 1: prismatic
+                        response->values[i].integer_array_value = {0, 0, 0};
+                    }
+                    else if (request->names[i] == "compliant_modes")
+                    {
+                        response->values[i].type = rcl_interfaces::msg::ParameterType::PARAMETER_BOOL_ARRAY;
+                        response->values[i].bool_array_value = {false, false, false};
+                    }
+                    else
+                    {
+                        response->values[i].type = rcl_interfaces::msg::ParameterType::PARAMETER_NOT_SET;
+                    }
                 }
-                else if (request->names[i] == "joint_types") {
-                    response->values[i].type = rcl_interfaces::msg::ParameterType::PARAMETER_INTEGER_ARRAY;
-                    // 0: revolute, 1: prismatic
-                    response->values[i].integer_array_value = { 0, 0, 0 };
-                }
-                else if (request->names[i] == "compliant_modes") {
-                    response->values[i].type = rcl_interfaces::msg::ParameterType::PARAMETER_BOOL_ARRAY;
-                    response->values[i].bool_array_value = { false, false, false};
-                }
-                else {
-                    response->values[i].type = rcl_interfaces::msg::ParameterType::PARAMETER_NOT_SET;
-                }
-            }
-            yInfo() << "GetParameters service ended successfully.";
-        });
+                yInfo() << "GetParameters service ended successfully.";
+            });
 
         set_param_srv = this->create_service<rcl_interfaces::srv::SetParameters>(
             set_param_service,
             [](const std::shared_ptr<rcl_interfaces::srv::SetParameters::Request>,
-                std::shared_ptr<rcl_interfaces::srv::SetParameters::Response> response) {
-            response->results.resize(1);
-            response->results[0].successful = true;
-        });
+               std::shared_ptr<rcl_interfaces::srv::SetParameters::Response> response)
+            {
+                response->results.resize(1);
+                response->results[0].successful = true;
+            });
     }
 
     rclcpp::Publisher<sensor_msgs::msg::JointState>::SharedPtr joint_state_pub;
@@ -71,9 +86,33 @@ public:
     rclcpp::Subscription<sensor_msgs::msg::JointState>::SharedPtr joint_references_sub;
     rclcpp::Service<rcl_interfaces::srv::GetParameters>::SharedPtr get_param_srv;
     rclcpp::Service<rcl_interfaces::srv::SetParameters>::SharedPtr set_param_srv;
+
+    // Store last received joint references
+    sensor_msgs::msg::JointState last_joint_references;
+    std::mutex joint_references_mutex;
+    bool joint_references_received{false};
+
+    sensor_msgs::msg::JointState getLastJointReferences()
+    {
+        std::lock_guard<std::mutex> lock(joint_references_mutex);
+        return last_joint_references;
+    }
+
+    bool hasReceivedJointReferences()
+    {
+        std::lock_guard<std::mutex> lock(joint_references_mutex);
+        return joint_references_received;
+    }
+
+    void resetJointReferencesFlag()
+    {
+        std::lock_guard<std::mutex> lock(joint_references_mutex);
+        joint_references_received = false;
+    }
 };
 
-TEST_CASE("IsaacSimControlBoardNWCROS2 device basic functionality", "[ros2][isaacsim_controlboard]") {
+TEST_CASE("IsaacSimControlBoardNWCROS2 device basic functionality", "[ros2][isaacsim_controlboard]")
+{
     rclcpp::init(0, nullptr);
     yarp::os::Network::init();
 
@@ -84,13 +123,13 @@ TEST_CASE("IsaacSimControlBoardNWCROS2 device basic functionality", "[ros2][isaa
         "/motor_states",
         "/joint_references",
         "/get_parameters",
-        "/set_parameters"
-    );
+        "/set_parameters");
     rclcpp::executors::MultiThreadedExecutor executor;
     executor.add_node(dummy_node);
 
     // Start executor in a thread
-    std::thread exec_thread([&executor]() { executor.spin(); });
+    std::thread exec_thread([&executor]()
+                            { executor.spin(); });
 
     // Give time for services to be available
     std::this_thread::sleep_for(500ms);
@@ -111,11 +150,249 @@ TEST_CASE("IsaacSimControlBoardNWCROS2 device basic functionality", "[ros2][isaa
     int numberOfJoints = 0;
     REQUIRE(device.getAxes(&numberOfJoints));
     REQUIRE(numberOfJoints == 3);
-    for (int i = 0; i < numberOfJoints; ++i) {
+    for (int i = 0; i < numberOfJoints; ++i)
+    {
         std::string joint_name;
         REQUIRE(device.getAxisName(i, joint_name));
         std::string expected_name = "joint_" + std::to_string(i + 1);
         REQUIRE(std::string(joint_name) == expected_name);
+    }
+
+    REQUIRE(device.close());
+
+    executor.cancel();
+    exec_thread.join();
+    rclcpp::shutdown();
+}
+
+TEST_CASE("IsaacSimControlBoardNWCROS2 getEncoders function", "[ros2][isaacsim_controlboard][getEncoders]")
+{
+    rclcpp::init(0, nullptr);
+    yarp::os::Network::init();
+
+    // Dummy ROS2 node with required topics/services
+    auto dummy_node = std::make_shared<DummyCBNode>(
+        "dummy_cb_node_encoders",
+        "/joint_states_encoders",
+        "/motor_states_encoders",
+        "/joint_references_encoders",
+        "/get_parameters_encoders",
+        "/set_parameters_encoders");
+    rclcpp::executors::MultiThreadedExecutor executor;
+    executor.add_node(dummy_node);
+
+    // Start executor in a thread
+    std::thread exec_thread([&executor]()
+                            { executor.spin(); });
+
+    // Give time for services to be available
+    std::this_thread::sleep_for(500ms);
+
+    yarp::dev::IsaacSimControlBoardNWCROS2 device;
+    yarp::os::Property config;
+    config.put("streaming_node_name", "test_isaacsim_controlboard_streaming_encoders");
+    config.put("service_node_name", "test_isaacsim_controlboard_service_encoders");
+    config.put("joint_state_topic_name", "/joint_states_encoders");
+    config.put("motor_state_topic_name", "/motor_states_encoders");
+    config.put("joint_references_topic_name", "/joint_references_encoders");
+    config.put("get_parameters_service_name", "/get_parameters_encoders");
+    config.put("set_parameters_service_name", "/set_parameters_encoders");
+    config.put("service_request_timeout", 1.0);
+
+    REQUIRE(device.open(config));
+
+    int numberOfJoints = 0;
+    REQUIRE(device.getAxes(&numberOfJoints));
+    REQUIRE(numberOfJoints == 3);
+
+    // Test getEncoders before receiving any data (should fail)
+    std::vector<double> encoders(numberOfJoints);
+    REQUIRE_FALSE(device.getEncoders(encoders.data()));
+
+    // Publish joint state data (ROS2 publishes in radians)
+    sensor_msgs::msg::JointState joint_state_msg;
+    joint_state_msg.header.stamp = dummy_node->now();
+    joint_state_msg.name = {"joint_1", "joint_2", "joint_3"};
+    joint_state_msg.position = {0.1, 0.2, 0.3}; // radians
+    joint_state_msg.velocity = {0.0, 0.0, 0.0};
+    joint_state_msg.effort = {0.0, 0.0, 0.0};
+
+    dummy_node->joint_state_pub->publish(joint_state_msg);
+
+    // Give time for the message to be received
+    std::this_thread::sleep_for(500ms);
+
+    // Test getEncoders after receiving data (should succeed)
+    // Device returns in degrees for revolute joints
+    constexpr double rad2deg = 180.0 / M_PI;
+    REQUIRE(device.getEncoders(encoders.data()));
+    REQUIRE(encoders[0] == 0.1 * rad2deg);
+    REQUIRE(encoders[1] == 0.2 * rad2deg);
+    REQUIRE(encoders[2] == 0.3 * rad2deg);
+
+    // Publish updated joint state data (ROS2 publishes in radians)
+    joint_state_msg.header.stamp = dummy_node->now();
+    joint_state_msg.position = {1.5, -0.5, 2.0}; // radians
+    dummy_node->joint_state_pub->publish(joint_state_msg);
+
+    // Give time for the message to be received
+    std::this_thread::sleep_for(500ms);
+
+    // Test getEncoders with updated data (device returns in degrees)
+    REQUIRE(device.getEncoders(encoders.data()));
+    REQUIRE(encoders[0] == 1.5 * rad2deg);
+    REQUIRE(encoders[1] == -0.5 * rad2deg);
+    REQUIRE(encoders[2] == 2.0 * rad2deg);
+
+    REQUIRE(device.close());
+
+    executor.cancel();
+    exec_thread.join();
+    rclcpp::shutdown();
+}
+
+TEST_CASE("IsaacSimControlBoardNWCROS2 positionMove and setRefSpeeds", "[ros2][isaacsim_controlboard][positionMove][setRefSpeeds]")
+{
+    rclcpp::init(0, nullptr);
+    yarp::os::Network::init();
+
+    // Dummy ROS2 node with required topics/services
+    auto dummy_node = std::make_shared<DummyCBNode>(
+        "dummy_cb_node_position",
+        "/joint_states_position",
+        "/motor_states_position",
+        "/joint_references_position",
+        "/get_parameters_position",
+        "/set_parameters_position");
+    rclcpp::executors::MultiThreadedExecutor executor;
+    executor.add_node(dummy_node);
+
+    // Start executor in a thread
+    std::thread exec_thread([&executor]()
+                            { executor.spin(); });
+
+    // Give time for services to be available
+    std::this_thread::sleep_for(500ms);
+
+    yarp::dev::IsaacSimControlBoardNWCROS2 device;
+    yarp::os::Property config;
+    config.put("streaming_node_name", "test_isaacsim_controlboard_streaming_position");
+    config.put("service_node_name", "test_isaacsim_controlboard_service_position");
+    config.put("joint_state_topic_name", "/joint_states_position");
+    config.put("motor_state_topic_name", "/motor_states_position");
+    config.put("joint_references_topic_name", "/joint_references_position");
+    config.put("get_parameters_service_name", "/get_parameters_position");
+    config.put("set_parameters_service_name", "/set_parameters_position");
+    config.put("service_request_timeout", 1.0);
+
+    REQUIRE(device.open(config));
+
+    int numberOfJoints = 0;
+    REQUIRE(device.getAxes(&numberOfJoints));
+    REQUIRE(numberOfJoints == 3);
+
+    constexpr double deg2rad = M_PI / 180.0;
+    constexpr double rad2deg = 180.0 / M_PI;
+
+    SECTION("Test setRefSpeeds with positionMove - all joints")
+    {
+        dummy_node->resetJointReferencesFlag();
+
+        // Set reference speeds for all joints (input in degrees/second for revolute joints)
+        std::vector<double> ref_speeds = {10.0, 20.0, 30.0}; // deg/s
+        REQUIRE(device.setRefSpeeds(ref_speeds.data()));
+
+        // Set reference positions for all joints (input in degrees for revolute joints)
+        // setRefSpeeds must be called before positionMove to work together
+        std::vector<double> ref_positions = {30.0, 45.0, 60.0}; // degrees
+        REQUIRE(device.positionMove(ref_positions.data()));
+
+        // Give time for the message to be published
+        std::this_thread::sleep_for(500ms);
+
+        // Check that joint references were published with both velocity and position fields set
+        REQUIRE(dummy_node->hasReceivedJointReferences());
+        auto joint_refs = dummy_node->getLastJointReferences();
+        REQUIRE(joint_refs.name.size() == 3);
+        REQUIRE(joint_refs.velocity.size() == 3);
+        REQUIRE(joint_refs.position.size() == 3);
+        // Device should publish velocities in radians/second
+        REQUIRE(std::abs(joint_refs.velocity[0] - ref_speeds[0] * deg2rad) < 1e-6);
+        REQUIRE(std::abs(joint_refs.velocity[1] - ref_speeds[1] * deg2rad) < 1e-6);
+        REQUIRE(std::abs(joint_refs.velocity[2] - ref_speeds[2] * deg2rad) < 1e-6);
+        // Device should publish positions in radians
+        REQUIRE(std::abs(joint_refs.position[0] - ref_positions[0] * deg2rad) < 1e-6);
+        REQUIRE(std::abs(joint_refs.position[1] - ref_positions[1] * deg2rad) < 1e-6);
+        REQUIRE(std::abs(joint_refs.position[2] - ref_positions[2] * deg2rad) < 1e-6);
+    }
+
+    SECTION("Test setRefSpeed with positionMove - single joint")
+    {
+        dummy_node->resetJointReferencesFlag();
+
+        // Set reference speed for joint 1 (input in degrees/second)
+        double ref_speed = 45.0; // deg/s
+        REQUIRE(device.setRefSpeed(1, ref_speed));
+
+        // Set reference position for joint 1 (input in degrees)
+        // setRefSpeed must be called before positionMove to work together
+        double ref_position = 90.0; // degrees
+        REQUIRE(device.positionMove(1, ref_position));
+
+        // Give time for the message to be published
+        std::this_thread::sleep_for(500ms);
+
+        // Check that joint references were published
+        REQUIRE(dummy_node->hasReceivedJointReferences());
+        auto joint_refs = dummy_node->getLastJointReferences();
+        REQUIRE(joint_refs.velocity.size() >= 2);
+        REQUIRE(joint_refs.position.size() >= 2);
+        // Device should publish in radians/second and radians
+        REQUIRE(std::abs(joint_refs.velocity[1] - ref_speed * deg2rad) < 1e-6);
+        REQUIRE(std::abs(joint_refs.position[1] - ref_position * deg2rad) < 1e-6);
+    }
+
+    SECTION("Test positionMove - subset of joints")
+    {
+        dummy_node->resetJointReferencesFlag();
+
+        // Set reference speeds for joints 0 and 2 (input in degrees/second)
+        int n_joints = 2;
+        int joints[] = {0, 2};
+        double ref_speeds[] = {15.0, 25.0}; // deg/s
+        REQUIRE(device.setRefSpeeds(n_joints, joints, ref_speeds));
+
+        // Set reference positions for joints 0 and 2 (input in degrees)
+        // setRefSpeeds must be called before positionMove to work together
+        double ref_positions[] = {15.0, 75.0}; // degrees
+        REQUIRE(device.positionMove(n_joints, joints, ref_positions));
+
+        // Give time for the message to be published
+        std::this_thread::sleep_for(500ms);
+
+        // Check that joint references were published
+        REQUIRE(dummy_node->hasReceivedJointReferences());
+        auto joint_refs = dummy_node->getLastJointReferences();
+        // Should contain the specified joints
+        REQUIRE(joint_refs.position.size() >= 2);
+        REQUIRE(joint_refs.velocity.size() >= 2);
+        // Find the positions and velocities for the specified joints
+        for (int i = 0; i < n_joints; ++i)
+        {
+            bool found = false;
+            for (size_t j = 0; j < joint_refs.name.size(); ++j)
+            {
+                if (joint_refs.name[j] == "joint_" + std::to_string(joints[i] + 1))
+                {
+                    // Device should publish velocities in radians/second and positions in radians
+                    REQUIRE(std::abs(joint_refs.velocity[j] - ref_speeds[i] * deg2rad) < 1e-6);
+                    REQUIRE(std::abs(joint_refs.position[j] - ref_positions[i] * deg2rad) < 1e-6);
+                    found = true;
+                    break;
+                }
+            }
+            REQUIRE(found);
+        }
     }
 
     REQUIRE(device.close());
