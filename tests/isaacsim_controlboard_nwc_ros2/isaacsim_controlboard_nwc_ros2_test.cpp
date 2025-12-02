@@ -7,6 +7,7 @@
 #include <yarp/os/Property.h>
 #include <yarp/os/Network.h>
 #include <yarp/os/LogStream.h>
+#include <yarp/os/Vocab.h>
 #include <IsaacSimControlBoardNWCROS2.h>
 
 #include <thread>
@@ -40,8 +41,8 @@ public:
 
         get_param_srv = this->create_service<rcl_interfaces::srv::GetParameters>(
             get_param_service,
-            [](const std::shared_ptr<rcl_interfaces::srv::GetParameters::Request> request,
-               std::shared_ptr<rcl_interfaces::srv::GetParameters::Response> response)
+            [this](const std::shared_ptr<rcl_interfaces::srv::GetParameters::Request> request,
+                   std::shared_ptr<rcl_interfaces::srv::GetParameters::Response> response)
             {
                 // Return dummy values for required parameters
                 response->values.resize(request->names.size());
@@ -63,6 +64,27 @@ public:
                         response->values[i].type = rcl_interfaces::msg::ParameterType::PARAMETER_BOOL_ARRAY;
                         response->values[i].bool_array_value = {false, false, false};
                     }
+                    else if (request->names[i].find("control_modes") != std::string::npos)
+                    {
+                        // Handle control_modes[X] requests
+                        std::lock_guard<std::mutex> lock(control_modes_mutex);
+                        size_t start = request->names[i].find('[');
+                        size_t end = request->names[i].find(']');
+                        if (start != std::string::npos && end != std::string::npos)
+                        {
+                            int joint_idx = std::stoi(request->names[i].substr(start + 1, end - start - 1));
+                            if (joint_idx >= 0 && joint_idx < static_cast<int>(control_modes.size()))
+                            {
+                                response->values[i].type = rcl_interfaces::msg::ParameterType::PARAMETER_INTEGER;
+                                response->values[i].integer_value = control_modes[joint_idx];
+                            }
+                        }
+                        else
+                        {
+                            response->values[i].type = rcl_interfaces::msg::ParameterType::PARAMETER_INTEGER_ARRAY;
+                            response->values[i].integer_array_value = control_modes;
+                        }
+                    }
                     else
                     {
                         response->values[i].type = rcl_interfaces::msg::ParameterType::PARAMETER_NOT_SET;
@@ -72,11 +94,35 @@ public:
 
         set_param_srv = this->create_service<rcl_interfaces::srv::SetParameters>(
             set_param_service,
-            [](const std::shared_ptr<rcl_interfaces::srv::SetParameters::Request>,
-               std::shared_ptr<rcl_interfaces::srv::SetParameters::Response> response)
+            [this](const std::shared_ptr<rcl_interfaces::srv::SetParameters::Request> request,
+                   std::shared_ptr<rcl_interfaces::srv::SetParameters::Response> response)
             {
-                response->results.resize(1);
-                response->results[0].successful = true;
+                response->results.resize(request->parameters.size());
+                for (size_t i = 0; i < request->parameters.size(); ++i)
+                {
+                    if (request->parameters[i].name.find("control_modes") != std::string::npos)
+                    {
+                        std::lock_guard<std::mutex> lock(control_modes_mutex);
+                        // Extract joint index from parameter name like "control_modes[0]"
+                        size_t start = request->parameters[i].name.find('[');
+                        size_t end = request->parameters[i].name.find(']');
+                        if (start != std::string::npos && end != std::string::npos)
+                        {
+                            int joint_idx = std::stoi(request->parameters[i].name.substr(start + 1, end - start - 1));
+                            if (joint_idx >= 0 && joint_idx < static_cast<int>(control_modes.size()))
+                            {
+                                control_modes[joint_idx] = request->parameters[i].value.integer_value;
+                            }
+                        }
+                        else
+                        {
+                            // Handle setting all control modes at once
+                            control_modes = request->parameters[i].value.integer_array_value;
+                            REQUIRE(control_modes.size() == 3);
+                        }
+                    }
+                    response->results[i].successful = true;
+                }
             });
     }
 
@@ -90,6 +136,10 @@ public:
     sensor_msgs::msg::JointState last_joint_references;
     std::mutex joint_references_mutex;
     bool joint_references_received{false};
+
+    // Store control modes
+    std::vector<int64_t> control_modes{VOCAB_CM_POSITION, VOCAB_CM_POSITION, VOCAB_CM_POSITION}; // Default to VOCAB_CM_POSITION
+    std::mutex control_modes_mutex;
 
     sensor_msgs::msg::JointState getLastJointReferences()
     {
@@ -307,6 +357,43 @@ TEST_CASE("IsaacSimControlBoardNWCROS2", "[ros2][isaacsim_controlboard]")
             }
             REQUIRE(found);
         }
+    }
+
+    SECTION("Control modes")
+    {
+        // Test setControlMode for single joint
+        REQUIRE(device.setControlMode(0, VOCAB_CM_VELOCITY));
+        std::this_thread::sleep_for(sleep_duration);
+
+        // Test getControlMode for single joint
+        int mode = 0;
+        REQUIRE(device.getControlMode(0, &mode));
+        REQUIRE(mode == VOCAB_CM_VELOCITY);
+
+        // Test setControlModes for all joints
+        std::vector<int> modes_to_set = {VOCAB_CM_POSITION, VOCAB_CM_TORQUE, VOCAB_CM_VELOCITY};
+        REQUIRE(device.setControlModes(modes_to_set.data()));
+        std::this_thread::sleep_for(sleep_duration);
+
+        // Test getControlModes for all joints
+        std::vector<int> modes_read(numberOfJoints);
+        REQUIRE(device.getControlModes(modes_read.data()));
+        REQUIRE(modes_read[0] == VOCAB_CM_POSITION);
+        REQUIRE(modes_read[1] == VOCAB_CM_TORQUE);
+        REQUIRE(modes_read[2] == VOCAB_CM_VELOCITY);
+
+        // Test setControlModes for subset of joints
+        int n_joints = 2;
+        int joints[] = {0, 2};
+        int modes_subset[] = {VOCAB_CM_TORQUE, VOCAB_CM_POSITION};
+        REQUIRE(device.setControlModes(n_joints, joints, modes_subset));
+        std::this_thread::sleep_for(sleep_duration);
+
+        // Test getControlModes for subset of joints
+        int modes_subset_read[2];
+        REQUIRE(device.getControlModes(n_joints, joints, modes_subset_read));
+        REQUIRE(modes_subset_read[0] == VOCAB_CM_TORQUE);
+        REQUIRE(modes_subset_read[1] == VOCAB_CM_POSITION);
     }
 
     REQUIRE(device.close());
