@@ -126,12 +126,14 @@ TEST_CASE("IsaacSimControlBoardNWCROS2", "[ros2][isaacsim_controlboard]")
     rclcpp::executors::MultiThreadedExecutor executor;
     executor.add_node(dummy_node);
 
+    auto sleep_duration = 50ms;
+
     // Start executor in a thread
     std::thread exec_thread([&executor]()
                             { executor.spin(); });
 
     // Give time for services to be available
-    std::this_thread::sleep_for(500ms);
+    std::this_thread::sleep_for(sleep_duration);
 
     yarp::dev::IsaacSimControlBoardNWCROS2 device;
     yarp::os::Property config;
@@ -182,7 +184,7 @@ TEST_CASE("IsaacSimControlBoardNWCROS2", "[ros2][isaacsim_controlboard]")
         dummy_node->joint_state_pub->publish(joint_state_msg);
 
         // Give time for the message to be received
-        std::this_thread::sleep_for(500ms);
+        std::this_thread::sleep_for(sleep_duration);
 
         // Test getEncoders after receiving data (should succeed)
         // Device returns in degrees for revolute joints
@@ -197,7 +199,7 @@ TEST_CASE("IsaacSimControlBoardNWCROS2", "[ros2][isaacsim_controlboard]")
         dummy_node->joint_state_pub->publish(joint_state_msg);
 
         // Give time for the message to be received
-        std::this_thread::sleep_for(500ms);
+        std::this_thread::sleep_for(sleep_duration);
 
         // Test getEncoders with updated data (device returns in degrees)
         REQUIRE(device.getEncoders(encoders.data()));
@@ -220,7 +222,7 @@ TEST_CASE("IsaacSimControlBoardNWCROS2", "[ros2][isaacsim_controlboard]")
         REQUIRE(device.positionMove(ref_positions.data()));
 
         // Give time for the message to be published
-        std::this_thread::sleep_for(500ms);
+        std::this_thread::sleep_for(sleep_duration);
 
         // Check that joint references were published with both velocity and position fields set
         REQUIRE(dummy_node->hasReceivedJointReferences());
@@ -252,7 +254,7 @@ TEST_CASE("IsaacSimControlBoardNWCROS2", "[ros2][isaacsim_controlboard]")
         REQUIRE(device.positionMove(1, ref_position));
 
         // Give time for the message to be published
-        std::this_thread::sleep_for(500ms);
+        std::this_thread::sleep_for(sleep_duration);
 
         // Check that joint references were published
         REQUIRE(dummy_node->hasReceivedJointReferences());
@@ -280,7 +282,7 @@ TEST_CASE("IsaacSimControlBoardNWCROS2", "[ros2][isaacsim_controlboard]")
         REQUIRE(device.positionMove(n_joints, joints, ref_positions));
 
         // Give time for the message to be published
-        std::this_thread::sleep_for(500ms);
+        std::this_thread::sleep_for(sleep_duration);
 
         // Check that joint references were published
         REQUIRE(dummy_node->hasReceivedJointReferences());
