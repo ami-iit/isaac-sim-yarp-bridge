@@ -445,11 +445,17 @@ public:
 
 private:
 
+    using Parameters = std::vector<std::pair<std::string, uint8_t>>;
+
     bool setup();
 
     void updateJointMeasurements(const sensor_msgs::msg::JointState::ConstSharedPtr msg);
 
     void updateMotorMeasurements(const sensor_msgs::msg::JointState::ConstSharedPtr msg);
+
+    std::vector<rcl_interfaces::msg::ParameterValue> getParameters(const Parameters& parameters);
+
+    std::vector<rcl_interfaces::msg::SetParametersResult> setParameters(const std::vector<rcl_interfaces::msg::Parameter>& params);
 
     struct JointsState
     {
@@ -469,39 +475,41 @@ private:
         void invalidate();
     };
 
-    class CBNode : public rclcpp::Node
+    class CBStreamingNode : public rclcpp::Node
     {
     public:
-
-        using Parameters = std::vector<std::pair<std::string, uint8_t>>;
-        explicit CBNode(const std::string& node_name,
-                        const std::string& joint_state_topic_name,
-                        const std::string& motor_state_topic_name,
-                        const std::string& joint_references_topic_name,
-                        const std::string& get_param_service_name,
-                        const std::string& set_param_service_name,
-                        double requests_timeout_sec,
-                        IsaacSimControlBoardNWCROS2* parent);
-
-        std::vector<rcl_interfaces::msg::ParameterValue> getParameters(const Parameters& parameters);
-
-        std::vector<rcl_interfaces::msg::SetParametersResult> setParameters(const std::vector<rcl_interfaces::msg::Parameter>& params);
+        explicit CBStreamingNode(const std::string& node_name,
+                                 const std::string& joint_state_topic_name,
+                                 const std::string& motor_state_topic_name,
+                                 const std::string& joint_references_topic_name,
+                                 IsaacSimControlBoardNWCROS2* parent);
 
         void publishReferences(JointsState& msg);
-
-        bool waitServicesAvailable();
 
     private:
         rclcpp::Subscription<sensor_msgs::msg::JointState>::SharedPtr m_jointStateSubscription;
         rclcpp::Subscription<sensor_msgs::msg::JointState>::SharedPtr m_motorStateSubscription;
         rclcpp::Publisher<sensor_msgs::msg::JointState>::SharedPtr m_referencesPublisher;
-        rclcpp::Client<rcl_interfaces::srv::GetParameters>::SharedPtr m_getParamClient;
-        rclcpp::Client<rcl_interfaces::srv::SetParameters>::SharedPtr m_setParamClient;
         sensor_msgs::msg::JointState m_referencesMessageBuffer;
-        std::chrono::duration<double> m_requestsTimeout;
     };
 
-    std::shared_ptr<CBNode> m_node;
+    class CBServiceNode : public rclcpp::Node
+    {
+    public:
+        explicit CBServiceNode(const std::string& node_name,
+                               const std::string& get_param_service_name,
+                               const std::string& set_param_service_name,
+                               double requests_timeout_sec);
+
+        bool waitServicesAvailable();
+
+        rclcpp::Client<rcl_interfaces::srv::GetParameters>::SharedPtr getParamClient;
+        rclcpp::Client<rcl_interfaces::srv::SetParameters>::SharedPtr setParamClient;
+        std::chrono::duration<double> requestsTimeout;
+    };
+
+    std::shared_ptr<CBStreamingNode> m_streamingNode;
+    std::shared_ptr<CBServiceNode> m_serviceNode;
     std::unique_ptr<rclcpp::executors::MultiThreadedExecutor> m_executor;
     std::mutex m_mutex;
     std::thread m_executorThread;

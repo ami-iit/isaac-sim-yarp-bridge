@@ -3,10 +3,55 @@
 #include "IsaacSimMultipleAnalogSensorsNWCROS2.h"
 #include <yarp/os/LogComponent.h>
 #include <yarp/os/LogStream.h>
+#include <yarp/os/Time.h>
 #include <yarp/sig/Matrix.h>
 
 YARP_DECLARE_LOG_COMPONENT(MAS)
 YARP_LOG_COMPONENT(MAS, "yarp.device.IsaacSimMultipleAnalogSensorsNWCROS2")
+
+bool yarp::dev::IsaacSimMultipleAnalogSensorsNWCROS2::waitForData(double timeout)
+{
+    double elapsed_time = 0.0;
+    const double wait_time_s = 0.1;
+
+    if (timeout < 0.0)
+    {
+        return true;
+    }
+
+    while (elapsed_time <= timeout)
+    {
+        {
+            bool all_imus_valid = true;
+            for (const auto& imu : m_imus)
+            {
+                if (!imu.valid)
+                {
+                    all_imus_valid = false;
+                    break;
+                }
+            }
+            bool all_fts_valid = true;
+            for (const auto& ft : m_fts)
+            {
+                if (!ft.valid)
+                {
+                    all_fts_valid = false;
+                    break;
+                }
+            }
+            if (all_imus_valid && all_fts_valid)
+            {
+                return true;
+            }
+        }
+        yarp::os::Time::delay(wait_time_s);
+        elapsed_time += wait_time_s;
+    }
+
+    yCError(MAS) << "[waitForData] Did not receive data from one or more topic for" << timeout << "seconds.";
+    return false;
+}
 
 yarp::dev::IsaacSimMultipleAnalogSensorsNWCROS2::~IsaacSimMultipleAnalogSensorsNWCROS2()
 {
@@ -37,7 +82,7 @@ bool yarp::dev::IsaacSimMultipleAnalogSensorsNWCROS2::open(yarp::os::Searchable&
     m_executor->add_node(m_subscriber);
     m_executorThread = std::thread([this]() { m_executor->spin(); });
 
-    return true;
+    return waitForData(m_paramsParser.m_init_wait_time);
 }
 
 bool yarp::dev::IsaacSimMultipleAnalogSensorsNWCROS2::close()

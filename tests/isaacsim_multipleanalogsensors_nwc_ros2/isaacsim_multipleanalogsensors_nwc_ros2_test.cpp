@@ -111,6 +111,7 @@ TEST_CASE("IMU and FT messages reception", "[ros2]") {
 
     config.put("imu_topic_names", imu_topics);
     config.put("ft_topic_names", ft_topics);
+    config.put("init_wait_time", -1.0);
 
     REQUIRE(device.open(config));
     rclcpp::Time now = node->get_clock()->now();
