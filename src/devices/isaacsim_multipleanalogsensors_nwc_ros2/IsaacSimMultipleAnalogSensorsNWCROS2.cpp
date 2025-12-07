@@ -21,29 +21,27 @@ bool yarp::dev::IsaacSimMultipleAnalogSensorsNWCROS2::waitForData(double timeout
 
     while (elapsed_time <= timeout)
     {
+        bool all_imus_valid = true;
+        for (const auto& imu : m_imus)
         {
-            bool all_imus_valid = true;
-            for (const auto& imu : m_imus)
+            if (!imu.valid)
             {
-                if (!imu.valid)
-                {
-                    all_imus_valid = false;
-                    break;
-                }
+                all_imus_valid = false;
+                break;
             }
-            bool all_fts_valid = true;
-            for (const auto& ft : m_fts)
+        }
+        bool all_fts_valid = true;
+        for (const auto& ft : m_fts)
+        {
+            if (!ft.valid)
             {
-                if (!ft.valid)
-                {
-                    all_fts_valid = false;
-                    break;
-                }
+                all_fts_valid = false;
+                break;
             }
-            if (all_imus_valid && all_fts_valid)
-            {
-                return true;
-            }
+        }
+        if (all_imus_valid && all_fts_valid)
+        {
+            return true;
         }
         yarp::os::Time::delay(wait_time_s);
         elapsed_time += wait_time_s;
