@@ -9,9 +9,9 @@
 #include <yarp/dev/IPreciselyTimed.h>
 
 #include <rcl_interfaces/msg/parameter.hpp>
+#include <rcl_interfaces/msg/parameter_event.hpp>
 #include <rcl_interfaces/msg/parameter_value.hpp>
 #include <rcl_interfaces/msg/set_parameters_result.hpp>
-#include <rcl_interfaces/srv/get_parameters.hpp>
 #include <rcl_interfaces/srv/set_parameters.hpp>
 #include <rclcpp/executors/multi_threaded_executor.hpp>
 #include <rclcpp/node.hpp>
@@ -23,6 +23,7 @@
 #include <mutex>
 #include <string>
 #include <thread>
+#include <unordered_map>
 #include <vector>
 
 #include "IsaacSimControlBoardNWCROS2_ParamsParser.h"
@@ -446,9 +447,13 @@ private:
 
     bool setup();
 
+    bool waitForParameters(double timeout);
+
     void updateJointMeasurements(const sensor_msgs::msg::JointState::ConstSharedPtr msg);
 
     void updateMotorMeasurements(const sensor_msgs::msg::JointState::ConstSharedPtr msg);
+
+    void updateParameterCache(const rcl_interfaces::msg::ParameterEvent::ConstSharedPtr msg);
 
     std::vector<rcl_interfaces::msg::ParameterValue> getParameters(const Parameters& parameters);
 
@@ -478,13 +483,15 @@ private:
     public:
         explicit CBStreamingNode(const std::string& node_name, const std::string& joint_state_topic_name,
                                  const std::string& motor_state_topic_name,
-                                 const std::string& joint_references_topic_name, IsaacSimControlBoardNWCROS2* parent);
+                                 const std::string& joint_references_topic_name,
+                                 const std::string& parameter_events_topic_name, IsaacSimControlBoardNWCROS2* parent);
 
         void publishReferences(JointsState& msg);
 
     private:
         rclcpp::Subscription<sensor_msgs::msg::JointState>::SharedPtr m_jointStateSubscription;
         rclcpp::Subscription<sensor_msgs::msg::JointState>::SharedPtr m_motorStateSubscription;
+        rclcpp::Subscription<rcl_interfaces::msg::ParameterEvent>::SharedPtr m_parameterEventsSubscription;
         rclcpp::Publisher<sensor_msgs::msg::JointState>::SharedPtr m_referencesPublisher;
         sensor_msgs::msg::JointState m_referencesMessageBuffer;
     };
@@ -492,12 +499,11 @@ private:
     class CBServiceNode : public rclcpp::Node
     {
     public:
-        explicit CBServiceNode(const std::string& node_name, const std::string& get_param_service_name,
-                               const std::string& set_param_service_name, double requests_timeout_sec);
+        explicit CBServiceNode(const std::string& node_name, const std::string& set_param_service_name,
+                               double requests_timeout_sec);
 
-        bool waitServicesAvailable();
+        bool waitServicesAvailable(double timeout);
 
-        rclcpp::Client<rcl_interfaces::srv::GetParameters>::SharedPtr getParamClient;
         rclcpp::Client<rcl_interfaces::srv::SetParameters>::SharedPtr setParamClient;
         std::chrono::duration<double> requestsTimeout;
     };
@@ -513,5 +519,10 @@ private:
     std::vector<double> m_compliantOffset;
     std::vector<bool> m_compliant;
     std::atomic<bool> m_ready{false};
+
+    // Cache for parameter values received from parameter events
+    std::unordered_map<std::string, rcl_interfaces::msg::ParameterValue> m_parameterCache;
+    std::atomic<bool> m_parametersReady{false};
+    mutable std::mutex m_parameterCacheMutex;
 };
 #endif
