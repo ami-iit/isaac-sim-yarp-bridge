@@ -116,9 +116,16 @@ class ControlBoardSettings:
 class ControlMode(enum.IntEnum):
     @staticmethod
     def create_vocab_32(a, b=chr(0), c=chr(0), d=chr(0)):
-        return (ord(a)) + (ord(b) << 8) + (ord(c) << 16) + (ord(d) << 24)
+        def to_byte(x):
+            x = ord(x)
+            return x & 0xFF
+
+        value = to_byte(a) | (to_byte(b) << 8) | (to_byte(c) << 16) | (to_byte(d) << 24)
+
+        return value
 
     IDLE = create_vocab_32("i", "d", "l")  # VOCAB_CM_IDLE
+    FORCE_IDLE = create_vocab_32("f", "i", "d", "l")  # VOCAB_CM_FORCE_IDLE
     POSITION = create_vocab_32("p", "o", "s")  # VOCAB_CM_POSITION
     POSITION_DIRECT = create_vocab_32("p", "o", "s", "d")  # VOCAB_CM_POSITION_DIRECT
     VELOCITY = create_vocab_32("v", "e", "l")  # VOCAB_CM_VELOCITY
@@ -1014,6 +1021,15 @@ def get_pid_output(
         reference_current = max(min(reference_current, max_current), -max_current)
 
     if (
+        cb_state.previous_control_modes[joint_index] == ControlMode.HARDWARE_FAULT
+        and control_mode != ControlMode.HARDWARE_FAULT
+    ):
+        if control_mode != ControlMode.FORCE_IDLE:
+            cb_state.control_modes[joint_index] = ControlMode.HARDWARE_FAULT
+            control_mode = ControlMode.HARDWARE_FAULT
+            db.log_error("Can use only FORCE_IDLE to reset from HARDWARE_FAULT")
+
+    if (
         control_mode == ControlMode.POSITION
         or control_mode == ControlMode.POSITION_DIRECT
     ):
@@ -1167,7 +1183,11 @@ def get_pid_output(
         current_dict["torque"] = output_torque
         return output_torque
 
-    elif control_mode == ControlMode.IDLE or control_mode == ControlMode.HARDWARE_FAULT:
+    elif control_mode == ControlMode.IDLE or control_mode == ControlMode.FORCE_IDLE:
+        cb_state.control_modes[joint_index] = ControlMode.IDLE
+        cb_state.previous_control_modes[joint_index] = ControlMode.IDLE
+        return 0.0
+    elif control_mode == ControlMode.HARDWARE_FAULT:
         cb_state.previous_control_modes[joint_index] = control_mode
         return 0.0
     else:
