@@ -952,7 +952,7 @@ s = Settings(
     topic_prefix="/ergocub",
     domain_id=0,
     useDomainIDEnvVar=True,
-    node_timeout=0.001,
+    node_timeout=0,
     control_boards=[
         ControlBoard(
             name="head",
@@ -1014,9 +1014,9 @@ s = Settings(
                 "l_ankle_pitch",
                 "l_ankle_roll",
             ],
-            joint_damping=[x * 5.0 for x in [10.0, 2.0, 2.0, 10.0, 10.0, 2.0]],
+            joint_damping=[x * 5.0 for x in [10.0, 10.0, 10.0, 10.0, 10.0, 10.0]],
             position_p_gains=[
-                x * 3.0 for x in [350.0, 70.0, 40.0, 200.0, 1000.0, 100.0]
+                x * 3.0 for x in [1000.0, 1000.0, 1000.0, 1000.0, 1000.0, 1200.0]
             ],
             position_i_gains=[x * 0.0 for x in [0.17, 0.17, 0.35, 0.35, 0.35, 0.35]],
             position_d_gains=[x * 20.0 for x in [0.15, 0.15, 0.35, 0.15, 0.15, 0.15]],
@@ -1048,9 +1048,9 @@ s = Settings(
                 "r_ankle_pitch",
                 "r_ankle_roll",
             ],
-            joint_damping=[x * 5.0 for x in [10.0, 2.0, 2.0, 10.0, 10.0, 2.0]],
+            joint_damping=[x * 5.0 for x in [10.0, 10.0, 10.0, 10.0, 10.0, 10.0]],
             position_p_gains=[
-                x * 3.0 for x in [350.0, 70.0, 40.0, 200.0, 1000.0, 100.0]
+                x * 3.0 for x in [1000.0, 1000.0, 1000.0, 1000.0, 1000.0, 1200.0]
             ],
             position_i_gains=[x * 0.0 for x in [0.17, 0.17, 0.35, 0.35, 0.35, 0.35]],
             position_d_gains=[x * 20.0 for x in [0.15, 0.15, 0.35, 0.15, 0.15, 0.15]],
@@ -1083,9 +1083,9 @@ s = Settings(
                 "l_wrist_roll",
                 "l_wrist_pitch",
             ],
-            joint_damping=[x * 1.0 for x in [10.0, 10.0, 10.0, 1.0, 1.0, 1.0, 1.0]],
+            joint_damping=[x * 1.0 for x in [10.0, 10.0, 10.0, 10.0, 1.0, 1.0, 1.0]],
             position_p_gains=[
-                x * 5.0 for x in [20.0, 20.0, 20.0, 1.745, 1.745, 1.745, 1.745]
+                x * 5.0 for x in [100.0, 100.0, 100.0, 100.0, 1.745, 1.745, 1.745]
             ],
             position_i_gains=[0.174, 0.174, 0.174, 0.174, 0.174, 0.174, 0.0],
             position_d_gains=[0.174, 0.174, 0.174, 0.174, 0.174, 0.174, 0.0],
@@ -1118,9 +1118,9 @@ s = Settings(
                 "r_wrist_roll",
                 "r_wrist_pitch",
             ],
-            joint_damping=[x * 1.0 for x in [10.0, 10.0, 10.0, 1.0, 1.0, 1.0, 1.0]],
+            joint_damping=[x * 1.0 for x in [10.0, 10.0, 10.0, 10.0, 1.0, 1.0, 1.0]],
             position_p_gains=[
-                x * 5.0 for x in [20.0, 20.0, 20.0, 1.745, 1.745, 1.745, 1.745]
+                x * 5.0 for x in [100.0, 100.0, 100.0, 100.0, 1.745, 1.745, 1.745]
             ],
             position_i_gains=[0.174, 0.174, 0.174, 0.174, 0.174, 0.174, 0.0],
             position_d_gains=[0.174, 0.174, 0.174, 0.174, 0.174, 0.174, 0.0],
