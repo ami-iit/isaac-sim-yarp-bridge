@@ -87,15 +87,18 @@ bool yarp::dev::IsaacSimControlBoardNWCROS2::open(yarp::os::Searchable& config)
 
         if (!rclcpp::ok())
         {
-            rclcpp::init(0, nullptr);
+            rclcpp::InitOptions options;
+            options.shutdown_on_signal = false; // <-- disable ROS2 SIGINT handler
+            rclcpp::init(0, nullptr, options);
         }
 
         m_streamingNode = std::make_shared<CBStreamingNode>(
             m_paramsParser.m_streaming_node_name, m_paramsParser.m_joint_state_topic_name,
-            m_paramsParser.m_motor_state_topic_name, m_paramsParser.m_joint_references_topic_name, this);
-        m_serviceNode = std::make_shared<CBServiceNode>(
-            m_paramsParser.m_service_node_name, m_paramsParser.m_get_parameters_service_name,
-            m_paramsParser.m_set_parameters_service_name, m_paramsParser.m_service_request_timeout);
+            m_paramsParser.m_motor_state_topic_name, m_paramsParser.m_joint_references_topic_name,
+            m_paramsParser.m_parameter_events_topic_name, this);
+        m_serviceNode = std::make_shared<CBServiceNode>(m_paramsParser.m_service_node_name,
+                                                        m_paramsParser.m_set_parameters_service_name,
+                                                        m_paramsParser.m_requests_timeout);
 
         m_executor = std::make_unique<rclcpp::executors::MultiThreadedExecutor>();
         m_executor->add_node(m_streamingNode);
@@ -2409,13 +2412,11 @@ bool yarp::dev::IsaacSimControlBoardNWCROS2::getEncoderSpeeds(double* spds)
 
 bool yarp::dev::IsaacSimControlBoardNWCROS2::getEncoderAcceleration(int j, double* acc)
 {
-    yCError(CB) << "[getEncoderAcceleration] It is not possible to get encoder acceleration in Isaac sim.";
     return false;
 }
 
 bool yarp::dev::IsaacSimControlBoardNWCROS2::getEncoderAccelerations(double* accs)
 {
-    yCError(CB) << "[getEncoderAccelerations] It is not possible to get encoder accelerations in Isaac sim.";
     return false;
 }
 
@@ -2578,13 +2579,11 @@ bool yarp::dev::IsaacSimControlBoardNWCROS2::getMotorEncoderSpeeds(double* spds)
 
 bool yarp::dev::IsaacSimControlBoardNWCROS2::getMotorEncoderAcceleration(int m, double* acc)
 {
-    yCError(CB) << "[getMotorEncoderAcceleration] It is not possible to get motor encoder acceleration in Isaac sim.";
     return false;
 }
 
 bool yarp::dev::IsaacSimControlBoardNWCROS2::getMotorEncoderAccelerations(double* accs)
 {
-    yCError(CB) << "[getMotorEncoderAccelerations] It is not possible to get motor encoder accelerations in Isaac sim.";
     return false;
 }
 
@@ -4666,14 +4665,23 @@ bool yarp::dev::IsaacSimControlBoardNWCROS2::setup()
 
     std::string errorPrefix = "[setup] ";
 
-    if (!m_serviceNode->waitServicesAvailable())
+    double waitTimeout = m_paramsParser.m_requests_timeout * 10.0;
+
+    if (!m_serviceNode->waitServicesAvailable(waitTimeout))
     {
         yCError(CB) << errorPrefix << "Not all services are available.";
         m_ready = false;
         return m_ready;
     }
 
-    // The impedance offset is set continuosly from outside,
+    if (!waitForParameters(waitTimeout))
+    {
+        yCError(CB) << errorPrefix << "Timeout waiting for initial parameters.";
+        m_ready = false;
+        return m_ready;
+    }
+
+    // The impedance offset is set continuously from outside,
     // but this is using the effort part in the refences message.
     // So we need to keep track of which joints are actually in
     // compliant mode to avoid overwriting a real effort reference.
@@ -4720,6 +4728,32 @@ bool yarp::dev::IsaacSimControlBoardNWCROS2::setup()
 
     m_ready = true;
     return m_ready;
+}
+
+bool yarp::dev::IsaacSimControlBoardNWCROS2::waitForParameters(double timeout)
+{
+    std::string errorPrefix = "[waitForParameters] ";
+    double elapsed_time = 0.0;
+    const double wait_time_s = 0.1;
+
+    if (timeout < 0.0)
+    {
+        return true;
+    }
+
+    while (elapsed_time <= timeout)
+    {
+        if (m_parametersReady)
+        {
+            return true;
+        }
+
+        yarp::os::Time::delay(wait_time_s);
+        elapsed_time += wait_time_s;
+    }
+
+    yCError(CB) << errorPrefix << "Timeout while waiting for parameters.";
+    return false;
 }
 
 void yarp::dev::IsaacSimControlBoardNWCROS2::updateJointMeasurements(
@@ -4837,6 +4871,7 @@ yarp::dev::IsaacSimControlBoardNWCROS2::CBStreamingNode::CBStreamingNode(const s
                                                                          const std::string& joint_state_topic_name,
                                                                          const std::string& motor_state_topic_name,
                                                                          const std::string& joint_references_topic_name,
+                                                                         const std::string& parameter_events_topic_name,
                                                                          IsaacSimControlBoardNWCROS2* parent)
     : rclcpp::Node(node_name)
 {
@@ -4846,6 +4881,9 @@ yarp::dev::IsaacSimControlBoardNWCROS2::CBStreamingNode::CBStreamingNode(const s
     m_motorStateSubscription = this->create_subscription<sensor_msgs::msg::JointState>(
         motor_state_topic_name, 10,
         [parent](const sensor_msgs::msg::JointState::ConstSharedPtr msg) { parent->updateMotorMeasurements(msg); });
+    m_parameterEventsSubscription = this->create_subscription<rcl_interfaces::msg::ParameterEvent>(
+        parameter_events_topic_name, 10,
+        [parent](const rcl_interfaces::msg::ParameterEvent::ConstSharedPtr msg) { parent->updateParameterCache(msg); });
     m_referencesPublisher = this->create_publisher<sensor_msgs::msg::JointState>(joint_references_topic_name, 10);
 }
 
@@ -4863,12 +4901,10 @@ void yarp::dev::IsaacSimControlBoardNWCROS2::CBStreamingNode::publishReferences(
 }
 
 yarp::dev::IsaacSimControlBoardNWCROS2::CBServiceNode::CBServiceNode(const std::string& node_name,
-                                                                     const std::string& get_param_service_name,
                                                                      const std::string& set_param_service_name,
                                                                      double requests_timeout_sec)
     : rclcpp::Node(node_name)
 {
-    getParamClient = this->create_client<rcl_interfaces::srv::GetParameters>(get_param_service_name);
     setParamClient = this->create_client<rcl_interfaces::srv::SetParameters>(set_param_service_name);
 
     requestsTimeout = std::chrono::duration<double>(requests_timeout_sec);
@@ -4878,54 +4914,150 @@ std::vector<rcl_interfaces::msg::ParameterValue>
 yarp::dev::IsaacSimControlBoardNWCROS2::getParameters(const Parameters& parameters)
 {
     std::string errorPrefix = "[getParameters] ";
-    auto get_request = std::make_shared<rcl_interfaces::srv::GetParameters::Request>();
-    get_request->names.resize(parameters.size());
-    for (size_t i = 0; i < parameters.size(); i++)
-    {
-        get_request->names[i] = parameters[i].first;
-    }
+    std::lock_guard<std::mutex> lock(m_parameterCacheMutex);
 
-    auto future = m_serviceNode->getParamClient->async_send_request(get_request);
-
-    if (rclcpp::spin_until_future_complete(m_serviceNode, future, m_serviceNode->requestsTimeout) !=
-        rclcpp::FutureReturnCode::SUCCESS)
-    {
-        yCError(CB) << errorPrefix << "Service call timed out";
-        return std::vector<rcl_interfaces::msg::ParameterValue>();
-    }
-
-    auto response = future.get();
-
-    if (!response)
-    {
-        yCError(CB) << errorPrefix << "Service call failed";
-        return std::vector<rcl_interfaces::msg::ParameterValue>();
-    }
-
-    const auto& values = response->values;
-    if (values.size() != parameters.size())
-    {
-        yCError(CB) << errorPrefix << "Unexpected number of results. Expected" << parameters.size() << "but got"
-                    << values.size();
-        return std::vector<rcl_interfaces::msg::ParameterValue>();
-    }
+    std::vector<rcl_interfaces::msg::ParameterValue> values;
+    values.reserve(parameters.size());
 
     for (size_t i = 0; i < parameters.size(); i++)
     {
-        if (values[i].type == Type::PARAMETER_NOT_SET)
+        std::string param_name = parameters[i].first;
+        int index = -1;
+        size_t start = param_name.find('[');
+        size_t end = param_name.find(']');
+
+        if (start != std::string::npos && end != std::string::npos && end > start)
         {
-            yCError(CB) << errorPrefix << "Parameter" << parameters[i].first << "not set.";
+            index = std::stoi(param_name.substr(start + 1, end - start - 1));
+            param_name = param_name.substr(0, start);
+        }
+
+        auto it = m_parameterCache.find(param_name);
+
+        if (it == m_parameterCache.end())
+        {
+            yCError(CB) << errorPrefix << "Parameter" << param_name << "not found in cache.";
             return std::vector<rcl_interfaces::msg::ParameterValue>();
         }
 
-        if (parameters[i].second != Type::PARAMETER_NOT_SET && values[i].type != parameters[i].second)
+        const auto& value = it->second;
+
+        if (value.type == Type::PARAMETER_NOT_SET)
         {
-            yCError(CB) << errorPrefix << "Unexpected type for parameter" << parameters[i].first << ". Expected"
-                        << parameters[i].second << "but got" << values[i].type;
+            yCError(CB) << errorPrefix << "Parameter" << param_name << "not set.";
             return std::vector<rcl_interfaces::msg::ParameterValue>();
         }
+
+        if (index < 0)
+        {
+            if (parameters[i].second != Type::PARAMETER_NOT_SET && value.type != parameters[i].second)
+            {
+                yCError(CB) << errorPrefix << "Unexpected type for parameter" << param_name << ". Expected"
+                            << parameters[i].second << "but got" << value.type;
+                return std::vector<rcl_interfaces::msg::ParameterValue>();
+            }
+            values.push_back(value);
+        }
+        else
+        {
+            // Handle array types
+            rcl_interfaces::msg::ParameterValue array_element;
+            switch (value.type)
+            {
+            case Type::PARAMETER_BOOL_ARRAY:
+                if (index >= static_cast<int>(value.bool_array_value.size()))
+                {
+                    yCError(CB) << errorPrefix << "Index" << index << "out of range for parameter" << param_name;
+                    return std::vector<rcl_interfaces::msg::ParameterValue>();
+                }
+                if (parameters[i].second != Type::PARAMETER_NOT_SET && parameters[i].second != Type::PARAMETER_BOOL)
+                {
+                    yCError(CB) << errorPrefix << "Unexpected type for parameter" << param_name << "[" << index
+                                << "]. Expected" << parameters[i].second << "but got" << Type::PARAMETER_BOOL;
+                    return std::vector<rcl_interfaces::msg::ParameterValue>();
+                }
+                array_element.type = Type::PARAMETER_BOOL;
+                array_element.bool_value = value.bool_array_value[index];
+                break;
+            case Type::PARAMETER_INTEGER_ARRAY:
+                if (index >= static_cast<int>(value.integer_array_value.size()))
+                {
+                    yCError(CB) << errorPrefix << "Index" << index << "out of range for parameter" << param_name;
+                    return std::vector<rcl_interfaces::msg::ParameterValue>();
+                }
+                if (parameters[i].second != Type::PARAMETER_NOT_SET && parameters[i].second != Type::PARAMETER_INTEGER)
+                {
+                    yCError(CB) << errorPrefix << "Unexpected type for parameter" << param_name << "[" << index
+                                << "]. Expected" << parameters[i].second << "but got" << Type::PARAMETER_INTEGER;
+                    return std::vector<rcl_interfaces::msg::ParameterValue>();
+                }
+                array_element.type = Type::PARAMETER_INTEGER;
+                array_element.integer_value = value.integer_array_value[index];
+                break;
+            case Type::PARAMETER_DOUBLE_ARRAY:
+                if (index >= static_cast<int>(value.double_array_value.size()))
+                {
+                    yCError(CB) << errorPrefix << "Index" << index << "out of range for parameter" << param_name;
+                    return std::vector<rcl_interfaces::msg::ParameterValue>();
+                }
+                if (parameters[i].second != Type::PARAMETER_NOT_SET && parameters[i].second != Type::PARAMETER_DOUBLE)
+                {
+                    yCError(CB) << errorPrefix << "Unexpected type for parameter" << param_name << "[" << index
+                                << "]. Expected" << parameters[i].second << "but got" << Type::PARAMETER_DOUBLE;
+                    return std::vector<rcl_interfaces::msg::ParameterValue>();
+                }
+                array_element.type = Type::PARAMETER_DOUBLE;
+                array_element.double_value = value.double_array_value[index];
+                break;
+            case Type::PARAMETER_STRING_ARRAY:
+                if (index >= static_cast<int>(value.string_array_value.size()))
+                {
+                    yCError(CB) << errorPrefix << "Index" << index << "out of range for parameter" << param_name;
+                    return std::vector<rcl_interfaces::msg::ParameterValue>();
+                }
+                if (parameters[i].second != Type::PARAMETER_NOT_SET && parameters[i].second != Type::PARAMETER_STRING)
+                {
+                    yCError(CB) << errorPrefix << "Unexpected type for parameter" << param_name << "[" << index
+                                << "]. Expected" << parameters[i].second << "but got" << Type::PARAMETER_STRING;
+                    return std::vector<rcl_interfaces::msg::ParameterValue>();
+                }
+                array_element.type = Type::PARAMETER_STRING;
+                array_element.string_value = value.string_array_value[index];
+                break;
+            default:
+                yCError(CB) << errorPrefix << "Parameter" << param_name << "is not an array type.";
+                return std::vector<rcl_interfaces::msg::ParameterValue>();
+            }
+            values.push_back(array_element);
+        }
     }
+
     return values;
+}
+
+void yarp::dev::IsaacSimControlBoardNWCROS2::updateParameterCache(
+    const rcl_interfaces::msg::ParameterEvent::ConstSharedPtr msg)
+{
+    std::lock_guard<std::mutex> lock(m_parameterCacheMutex);
+
+    // Update cache with new parameters
+    for (const auto& param : msg->new_parameters)
+    {
+        m_parameterCache[param.name] = param.value;
+    }
+
+    // Update cache with changed parameters
+    for (const auto& param : msg->changed_parameters)
+    {
+        m_parameterCache[param.name] = param.value;
+    }
+
+    // Remove deleted parameters from cache
+    for (const auto& param : msg->deleted_parameters)
+    {
+        m_parameterCache.erase(param.name);
+    }
+    m_parametersReady = true;
 }
 
 std::vector<rcl_interfaces::msg::SetParametersResult>
@@ -4952,8 +5084,7 @@ yarp::dev::IsaacSimControlBoardNWCROS2::setParameters(const std::vector<rcl_inte
     return response->results;
 }
 
-bool yarp::dev::IsaacSimControlBoardNWCROS2::CBServiceNode::waitServicesAvailable()
+bool yarp::dev::IsaacSimControlBoardNWCROS2::CBServiceNode::waitServicesAvailable(double timeout)
 {
-    return getParamClient->wait_for_service(requestsTimeout * 10) &&
-           setParamClient->wait_for_service(requestsTimeout * 10);
+    return setParamClient->wait_for_service(std::chrono::duration<double>(timeout));
 }

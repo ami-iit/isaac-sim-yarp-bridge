@@ -21,29 +21,27 @@ bool yarp::dev::IsaacSimMultipleAnalogSensorsNWCROS2::waitForData(double timeout
 
     while (elapsed_time <= timeout)
     {
+        bool all_imus_valid = true;
+        for (const auto& imu : m_imus)
         {
-            bool all_imus_valid = true;
-            for (const auto& imu : m_imus)
+            if (!imu.valid)
             {
-                if (!imu.valid)
-                {
-                    all_imus_valid = false;
-                    break;
-                }
+                all_imus_valid = false;
+                break;
             }
-            bool all_fts_valid = true;
-            for (const auto& ft : m_fts)
+        }
+        bool all_fts_valid = true;
+        for (const auto& ft : m_fts)
+        {
+            if (!ft.valid)
             {
-                if (!ft.valid)
-                {
-                    all_fts_valid = false;
-                    break;
-                }
+                all_fts_valid = false;
+                break;
             }
-            if (all_imus_valid && all_fts_valid)
-            {
-                return true;
-            }
+        }
+        if (all_imus_valid && all_fts_valid)
+        {
+            return true;
         }
         yarp::os::Time::delay(wait_time_s);
         elapsed_time += wait_time_s;
@@ -71,7 +69,9 @@ bool yarp::dev::IsaacSimMultipleAnalogSensorsNWCROS2::open(yarp::os::Searchable&
 
     if (!rclcpp::ok())
     {
-        rclcpp::init(0, nullptr);
+        rclcpp::InitOptions options;
+        options.shutdown_on_signal = false; // <-- disable ROS2 SIGINT handler
+        rclcpp::init(0, nullptr, options);
     }
 
     m_subscriber = std::make_shared<MASSubscriber>(m_paramsParser.m_node_name, m_paramsParser.m_imu_topic_names,

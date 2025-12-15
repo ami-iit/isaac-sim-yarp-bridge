@@ -1,7 +1,7 @@
 #include <IsaacSimControlBoardNWCROS2.h>
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
-#include <rcl_interfaces/srv/get_parameters.hpp>
+#include <rcl_interfaces/msg/parameter_event.hpp>
 #include <rcl_interfaces/srv/set_parameters.hpp>
 #include <rclcpp/rclcpp.hpp>
 #include <sensor_msgs/msg/joint_state.hpp>
@@ -22,7 +22,7 @@ class DummyCBNode : public rclcpp::Node
 public:
     DummyCBNode(const std::string& node_name, const std::string& joint_state_topic,
                 const std::string& motor_state_topic, const std::string& joint_references_topic,
-                const std::string& get_param_service, const std::string& set_param_service)
+                const std::string& parameter_events_topic, const std::string& set_param_service)
         : Node(node_name)
     {
         joint_state_pub = this->create_publisher<sensor_msgs::msg::JointState>(joint_state_topic, 10);
@@ -36,58 +36,8 @@ public:
                 joint_references_received = true;
             });
 
-        get_param_srv = this->create_service<rcl_interfaces::srv::GetParameters>(
-            get_param_service,
-            [this](const std::shared_ptr<rcl_interfaces::srv::GetParameters::Request> request,
-                   std::shared_ptr<rcl_interfaces::srv::GetParameters::Response> response)
-            {
-                // Return dummy values for required parameters
-                response->values.resize(request->names.size());
-                for (size_t i = 0; i < request->names.size(); ++i)
-                {
-                    if (request->names[i] == "joint_names")
-                    {
-                        response->values[i].type = rcl_interfaces::msg::ParameterType::PARAMETER_STRING_ARRAY;
-                        response->values[i].string_array_value = {"joint_1", "joint_2", "joint_3"};
-                    }
-                    else if (request->names[i] == "joint_types")
-                    {
-                        response->values[i].type = rcl_interfaces::msg::ParameterType::PARAMETER_INTEGER_ARRAY;
-                        // 0: revolute, 1: prismatic
-                        response->values[i].integer_array_value = {0, 0, 0};
-                    }
-                    else if (request->names[i] == "compliant_modes")
-                    {
-                        response->values[i].type = rcl_interfaces::msg::ParameterType::PARAMETER_BOOL_ARRAY;
-                        response->values[i].bool_array_value = {false, false, false};
-                    }
-                    else if (request->names[i].find("control_modes") != std::string::npos)
-                    {
-                        // Handle control_modes[X] requests
-                        std::lock_guard<std::mutex> lock(control_modes_mutex);
-                        size_t start = request->names[i].find('[');
-                        size_t end = request->names[i].find(']');
-                        if (start != std::string::npos && end != std::string::npos)
-                        {
-                            int joint_idx = std::stoi(request->names[i].substr(start + 1, end - start - 1));
-                            if (joint_idx >= 0 && joint_idx < static_cast<int>(control_modes.size()))
-                            {
-                                response->values[i].type = rcl_interfaces::msg::ParameterType::PARAMETER_INTEGER;
-                                response->values[i].integer_value = control_modes[joint_idx];
-                            }
-                        }
-                        else
-                        {
-                            response->values[i].type = rcl_interfaces::msg::ParameterType::PARAMETER_INTEGER_ARRAY;
-                            response->values[i].integer_array_value = control_modes;
-                        }
-                    }
-                    else
-                    {
-                        response->values[i].type = rcl_interfaces::msg::ParameterType::PARAMETER_NOT_SET;
-                    }
-                }
-            });
+        parameter_events_pub = this->create_publisher<rcl_interfaces::msg::ParameterEvent>(parameter_events_topic, 10);
+        param_timer = this->create_wall_timer(std::chrono::milliseconds(10), [this]() { this->publishParameters(); });
 
         set_param_srv = this->create_service<rcl_interfaces::srv::SetParameters>(
             set_param_service,
@@ -117,26 +67,71 @@ public:
                             control_modes = request->parameters[i].value.integer_array_value;
                             REQUIRE(control_modes.size() == 3);
                         }
+                        response->results[i].successful = true;
                     }
-                    response->results[i].successful = true;
+                    else
+                    {
+                        // Not implemented for other parameters
+                        response->results[i].successful = false;
+                    }
                 }
             });
+    }
+
+    void publishParameters()
+    {
+        rcl_interfaces::msg::ParameterEvent event_msg;
+        event_msg.node = this->get_fully_qualified_name();
+        event_msg.stamp = this->now();
+
+        // Add joint_names parameter
+        rcl_interfaces::msg::Parameter joint_names_param;
+        joint_names_param.name = "joint_names";
+        joint_names_param.value.type = rcl_interfaces::msg::ParameterType::PARAMETER_STRING_ARRAY;
+        joint_names_param.value.string_array_value = joint_names;
+        event_msg.changed_parameters.push_back(joint_names_param);
+
+        // Add joint_types parameter
+        rcl_interfaces::msg::Parameter joint_types_param;
+        joint_types_param.name = "joint_types";
+        joint_types_param.value.type = rcl_interfaces::msg::ParameterType::PARAMETER_INTEGER_ARRAY;
+        joint_types_param.value.integer_array_value = joint_types; // All revolute
+        event_msg.changed_parameters.push_back(joint_types_param);
+
+        // Add compliant_modes parameter
+        rcl_interfaces::msg::Parameter compliant_modes_param;
+        compliant_modes_param.name = "compliant_modes";
+        compliant_modes_param.value.type = rcl_interfaces::msg::ParameterType::PARAMETER_BOOL_ARRAY;
+        compliant_modes_param.value.bool_array_value = compliant_modes;
+        event_msg.changed_parameters.push_back(compliant_modes_param);
+
+        // Add control_modes array parameter
+        rcl_interfaces::msg::Parameter control_modes_array_param;
+        control_modes_array_param.name = "control_modes";
+        control_modes_array_param.value.type = rcl_interfaces::msg::ParameterType::PARAMETER_INTEGER_ARRAY;
+        control_modes_array_param.value.integer_array_value = control_modes;
+        event_msg.changed_parameters.push_back(control_modes_array_param);
+
+        parameter_events_pub->publish(event_msg);
     }
 
     rclcpp::Publisher<sensor_msgs::msg::JointState>::SharedPtr joint_state_pub;
     rclcpp::Publisher<sensor_msgs::msg::JointState>::SharedPtr motor_state_pub;
     rclcpp::Subscription<sensor_msgs::msg::JointState>::SharedPtr joint_references_sub;
-    rclcpp::Service<rcl_interfaces::srv::GetParameters>::SharedPtr get_param_srv;
+    rclcpp::Publisher<rcl_interfaces::msg::ParameterEvent>::SharedPtr parameter_events_pub;
     rclcpp::Service<rcl_interfaces::srv::SetParameters>::SharedPtr set_param_srv;
+    rclcpp::TimerBase::SharedPtr param_timer;
 
     // Store last received joint references
     sensor_msgs::msg::JointState last_joint_references;
     std::mutex joint_references_mutex;
     bool joint_references_received{false};
 
-    // Store control modes
-    std::vector<int64_t> control_modes{VOCAB_CM_POSITION, VOCAB_CM_POSITION,
-                                       VOCAB_CM_POSITION}; // Default to VOCAB_CM_POSITION
+    // Store parameters
+    std::vector<int64_t> control_modes{VOCAB_CM_POSITION, VOCAB_CM_POSITION, VOCAB_CM_POSITION};
+    std::vector<bool> compliant_modes{false, false, false};
+    std::vector<std::string> joint_names{"joint_1", "joint_2", "joint_3"};
+    std::vector<int64_t> joint_types{0, 0, 0}; // All revolute
     std::mutex control_modes_mutex;
 
     sensor_msgs::msg::JointState getLastJointReferences()
@@ -165,7 +160,7 @@ TEST_CASE("IsaacSimControlBoardNWCROS2", "[ros2][isaacsim_controlboard]")
 
     // Dummy ROS2 node with required topics/services
     auto dummy_node = std::make_shared<DummyCBNode>("dummy_cb_node", "/joint_states", "/motor_states",
-                                                    "/joint_references", "/get_parameters", "/set_parameters");
+                                                    "/joint_references", "/parameter_events", "/set_parameters");
     rclcpp::executors::MultiThreadedExecutor executor;
     executor.add_node(dummy_node);
 
@@ -174,7 +169,7 @@ TEST_CASE("IsaacSimControlBoardNWCROS2", "[ros2][isaacsim_controlboard]")
     // Start executor in a thread
     std::thread exec_thread([&executor]() { executor.spin(); });
 
-    // Give time for services to be available
+    // Give time for services and executor to be available
     std::this_thread::sleep_for(sleep_duration);
 
     yarp::dev::IsaacSimControlBoardNWCROS2 device;
@@ -184,9 +179,9 @@ TEST_CASE("IsaacSimControlBoardNWCROS2", "[ros2][isaacsim_controlboard]")
     config.put("joint_state_topic_name", "/joint_states");
     config.put("motor_state_topic_name", "/motor_states");
     config.put("joint_references_topic_name", "/joint_references");
-    config.put("get_parameters_service_name", "/get_parameters");
+    config.put("parameter_events_topic_name", "/parameter_events");
     config.put("set_parameters_service_name", "/set_parameters");
-    config.put("service_request_timeout", 1.0);
+    config.put("requests_timeout", 1.0);
 
     REQUIRE(device.open(config));
 

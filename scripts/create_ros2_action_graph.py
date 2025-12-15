@@ -68,7 +68,8 @@ class FT:
 
 @dataclasses.dataclass
 class Settings:
-    graph_path: str
+    sensors_graph_path: str
+    camera_graph_path: str
     robot_path: str
     topic_prefix: str
     domain_id: int
@@ -78,7 +79,8 @@ class Settings:
     imus: list[Imu]
     cameras: list[Camera]
     FTs: list[FT]
-    sim_frequency: float
+    physics_frequency: float
+    render_frequency: float
 
 
 # When creating nodes, first you specify the name of the node, and then the type of
@@ -104,10 +106,10 @@ def merge_actions(action_list):
     return output
 
 
-def create_basic_nodes(graph_keys, settings):
+def create_basic_nodes_sensors(graph_keys, settings):
     return {
         graph_keys.CREATE_NODES: [
-            ("tick", "omni.graph.action.OnPlaybackTick"),
+            ("phys_tick", "isaacsim.core.nodes.OnPhysicsStep"),
             ("sim_time", "isaacsim.core.nodes.IsaacReadSimulationTime"),
             ("ros2_context", "isaacsim.ros2.bridge.ROS2Context"),
         ],
@@ -119,13 +121,29 @@ def create_basic_nodes(graph_keys, settings):
     }
 
 
+def create_basic_nodes_camera(graph_keys, settings):
+    return {
+        graph_keys.CREATE_NODES: [
+            ("tick", "omni.graph.action.OnPlaybackTick"),
+            ("ros2_context_camera", "isaacsim.ros2.bridge.ROS2Context"),
+        ],
+        graph_keys.SET_VALUES: [
+            ("ros2_context_camera.inputs:domain_id", settings.domain_id),
+            (
+                "ros2_context_camera.inputs:useDomainIDEnvVar",
+                settings.useDomainIDEnvVar,
+            ),
+        ],
+    }
+
+
 def create_ros2_clock_publisher(graph_keys):
     return {
         graph_keys.CREATE_NODES: [
             ("ros2_clock_publisher", "isaacsim.ros2.bridge.ROS2PublishClock"),
         ],
         graph_keys.CONNECT: [
-            ("tick.outputs:tick", "ros2_clock_publisher.inputs:execIn"),
+            ("phys_tick.outputs:step", "ros2_clock_publisher.inputs:execIn"),
             ("ros2_context.outputs:context", "ros2_clock_publisher.inputs:context"),
             (
                 "sim_time.outputs:simulationTime",
@@ -164,12 +182,13 @@ def create_control_board_subcompound(
             (cb_script_name + ".inputs:reference_position_commands", "double[]"),
             (cb_script_name + ".inputs:reference_velocity_commands", "double[]"),
             (cb_script_name + ".inputs:reference_effort_commands", "double[]"),
+            (cb_script_name + ".inputs:reference_timestamp", "double"),
             (cb_script_name + ".inputs:robot_prim", "target"),
             (cb_script_name + ".inputs:domain_id", "uchar"),
             (cb_script_name + ".inputs:useDomainIDEnvVar", "bool"),
             (cb_script_name + ".inputs:node_name", "string"),
             (cb_script_name + ".inputs:node_set_parameters_service_name", "string"),
-            (cb_script_name + ".inputs:node_get_parameters_service_name", "string"),
+            (cb_script_name + ".inputs:node_parameters_event_topic_name", "string"),
             (cb_script_name + ".inputs:node_state_topic_name", "string"),
             (cb_script_name + ".inputs:node_motor_state_topic_name", "string"),
             (cb_script_name + ".inputs:node_timeout", "double"),
@@ -215,8 +234,8 @@ def create_control_board_subcompound(
                 cb_topic_prefix + "/set_parameters",
             ),
             (
-                cb_script_name + ".inputs:node_get_parameters_service_name",
-                cb_topic_prefix + "/get_parameters",
+                cb_script_name + ".inputs:node_parameters_event_topic_name",
+                cb_topic_prefix + "/parameter_events",
             ),
             (
                 cb_script_name + ".inputs:node_state_topic_name",
@@ -330,6 +349,10 @@ def create_control_board_subcompound(
             (
                 subscriber_name + ".outputs:effortCommand",
                 cb_script_name + ".inputs:reference_effort_commands",
+            ),
+            (
+                subscriber_name + ".outputs:timeStamp",
+                cb_script_name + ".inputs:reference_timestamp",
             ),
         ],
     }
@@ -453,7 +476,7 @@ def create_control_board_compounds(graph_keys, settings):
 
     subcompound_actions.append(set_efforts_actions)
 
-    connections.append(("tick.outputs:tick", compound_name + ".inputs:execIn"))
+    connections.append(("phys_tick.outputs:step", compound_name + ".inputs:execIn"))
     connections.append(
         ("ros2_context.outputs:context", compound_name + ".inputs:context")
     )
@@ -461,7 +484,7 @@ def create_control_board_compounds(graph_keys, settings):
         ("sim_time.outputs:simulationTime", compound_name + ".inputs:timestamp")
     )
     connections.append(
-        ("tick.outputs:deltaSeconds", compound_name + ".inputs:deltaTime")
+        ("phys_tick.outputs:deltaSimulationTime", compound_name + ".inputs:deltaTime")
     )
 
     return {
@@ -550,7 +573,7 @@ def create_imu_compounds(graph_keys, settings):
                 )
             )
 
-    connections.append(("tick.outputs:tick", compound_name + ".inputs:execIn"))
+    connections.append(("phys_tick.outputs:step", compound_name + ".inputs:execIn"))
     connections.append(
         ("ros2_context.outputs:context", compound_name + ".inputs:context")
     )
@@ -706,7 +729,7 @@ def create_camera_compounds(graph_keys, settings):
 
     connections.append(("tick.outputs:tick", compound_name + ".inputs:execIn"))
     connections.append(
-        ("ros2_context.outputs:context", compound_name + ".inputs:context")
+        ("ros2_context_camera.outputs:context", compound_name + ".inputs:context")
     )
 
     return {
@@ -876,7 +899,7 @@ def create_ft_compounds(graph_keys, settings):
     connections.append(
         ("sim_time.outputs:simulationTime", compound_name + ".inputs:timestamp")
     )
-    connections.append(("tick.outputs:tick", compound_name + ".inputs:execIn"))
+    connections.append(("phys_tick.outputs:step", compound_name + ".inputs:execIn"))
     connections.append(
         ("ros2_context.outputs:context", compound_name + ".inputs:context")
     )
@@ -899,55 +922,60 @@ def create_ft_compounds(graph_keys, settings):
     }
 
 
-def create_graph(actions_list):
+def create_graph(path, pipeline_stage, actions_list):
     (graph, nodes, prims, name_to_object_map) = og.Controller.edit(
-        {"graph_path": s.graph_path, "evaluator_name": "execution"},
+        {
+            "graph_path": path,
+            "evaluator_name": "execution",
+            "pipeline_stage": pipeline_stage,
+        },
         merge_actions(actions_list),
     )
     if graph.is_valid():
-        print("Graph created successfully!")
+        print(f"Graph {path} created successfully!")
     else:
         print("FAILED TO CREATE GRAPH!")
 
 
-def set_sim_frequency(freq):
-    if freq is None:
-        return
+def set_sim_frequencies(phys_frequency, render_frequency):
+    if phys_frequency is not None:
 
-    stage = stage_utils.get_current_stage()
+        stage = stage_utils.get_current_stage()
 
-    physics_scene_name = "/World/physicsScene"
-    # Add a physics scene prim to stage
-    UsdPhysics.Scene.Define(stage, Sdf.Path(physics_scene_name))
+        physics_scene_name = "/World/physicsScene"
+        # Add a physics scene prim to stage
+        UsdPhysics.Scene.Define(stage, Sdf.Path(physics_scene_name))
 
-    # Add PhysxSceneAPI
-    PhysxSchema.PhysxSceneAPI.Apply(stage.GetPrimAtPath(physics_scene_name))
+        # Add PhysxSceneAPI
+        PhysxSchema.PhysxSceneAPI.Apply(stage.GetPrimAtPath(physics_scene_name))
 
-    physx_scene_api = PhysxSchema.PhysxSceneAPI.Get(stage, physics_scene_name)
-    # Number of physics steps per second
-    physx_scene_api.CreateTimeStepsPerSecondAttr(freq)
+        physx_scene_api = PhysxSchema.PhysxSceneAPI.Get(stage, physics_scene_name)
+        # Number of physics steps per second
+        physx_scene_api.CreateTimeStepsPerSecondAttr(phys_frequency)
+        print(f"Physics frequency changed to {phys_frequency}Hz.")
 
-    layer = stage.GetRootLayer()
-    # Number of rendering updates per second
-    # This frequency also affects the "Playback Tick" of the OmniGraph
-    layer.timeCodesPerSecond = freq
-
-    print(f"Simulator frequency changed to {freq}Hz.")
+    if render_frequency is not None:
+        layer = stage.GetRootLayer()
+        # Number of rendering updates per second
+        # This frequency also affects the "Playback Tick" of the OmniGraph
+        layer.timeCodesPerSecond = render_frequency
+        print(f"Render frequency changed to {render_frequency}Hz.")
 
 
 #######################################################################################
 ########################## EDIT ONLY THE SETTINGS HERE BELOW ##########################
 #######################################################################################
-
-robot_path = "/World/ergoCubSN002/robot"
+robot_name = "ergoCubSN002"
+robot_path = f"/World/{robot_name}/robot"
 realsense_prefix = robot_path + "/realsense/sensors/RSD455"
 s = Settings(
-    graph_path="/World/ergoCubSN002/ros2_action_graph",
+    sensors_graph_path=f"/World/{robot_name}/ros2_action_graph_sensors",
+    camera_graph_path=f"/World/{robot_name}/ros2_action_graph_camera",
     robot_path=robot_path,
     topic_prefix="/ergocub",
     domain_id=0,
     useDomainIDEnvVar=True,
-    node_timeout=0.001,
+    node_timeout=0,
     control_boards=[
         ControlBoard(
             name="head",
@@ -1009,9 +1037,9 @@ s = Settings(
                 "l_ankle_pitch",
                 "l_ankle_roll",
             ],
-            joint_damping=[x * 5.0 for x in [10.0, 2.0, 2.0, 10.0, 10.0, 2.0]],
+            joint_damping=[x * 5.0 for x in [10.0, 10.0, 10.0, 10.0, 10.0, 10.0]],
             position_p_gains=[
-                x * 3.0 for x in [350.0, 70.0, 40.0, 200.0, 1000.0, 100.0]
+                x * 3.0 for x in [1000.0, 1000.0, 1000.0, 1000.0, 1000.0, 1200.0]
             ],
             position_i_gains=[x * 0.0 for x in [0.17, 0.17, 0.35, 0.35, 0.35, 0.35]],
             position_d_gains=[x * 20.0 for x in [0.15, 0.15, 0.35, 0.15, 0.15, 0.15]],
@@ -1043,9 +1071,9 @@ s = Settings(
                 "r_ankle_pitch",
                 "r_ankle_roll",
             ],
-            joint_damping=[x * 5.0 for x in [10.0, 2.0, 2.0, 10.0, 10.0, 2.0]],
+            joint_damping=[x * 5.0 for x in [10.0, 10.0, 10.0, 10.0, 10.0, 10.0]],
             position_p_gains=[
-                x * 3.0 for x in [350.0, 70.0, 40.0, 200.0, 1000.0, 100.0]
+                x * 3.0 for x in [1000.0, 1000.0, 1000.0, 1000.0, 1000.0, 1200.0]
             ],
             position_i_gains=[x * 0.0 for x in [0.17, 0.17, 0.35, 0.35, 0.35, 0.35]],
             position_d_gains=[x * 20.0 for x in [0.15, 0.15, 0.35, 0.15, 0.15, 0.15]],
@@ -1078,9 +1106,9 @@ s = Settings(
                 "l_wrist_roll",
                 "l_wrist_pitch",
             ],
-            joint_damping=[x * 1.0 for x in [10.0, 10.0, 10.0, 1.0, 1.0, 1.0, 1.0]],
+            joint_damping=[x * 1.0 for x in [10.0, 10.0, 10.0, 10.0, 1.0, 1.0, 1.0]],
             position_p_gains=[
-                x * 5.0 for x in [20.0, 20.0, 20.0, 1.745, 1.745, 1.745, 1.745]
+                x * 5.0 for x in [100.0, 100.0, 100.0, 100.0, 1.745, 1.745, 1.745]
             ],
             position_i_gains=[0.174, 0.174, 0.174, 0.174, 0.174, 0.174, 0.0],
             position_d_gains=[0.174, 0.174, 0.174, 0.174, 0.174, 0.174, 0.0],
@@ -1113,9 +1141,9 @@ s = Settings(
                 "r_wrist_roll",
                 "r_wrist_pitch",
             ],
-            joint_damping=[x * 1.0 for x in [10.0, 10.0, 10.0, 1.0, 1.0, 1.0, 1.0]],
+            joint_damping=[x * 1.0 for x in [10.0, 10.0, 10.0, 10.0, 1.0, 1.0, 1.0]],
             position_p_gains=[
-                x * 5.0 for x in [20.0, 20.0, 20.0, 1.745, 1.745, 1.745, 1.745]
+                x * 5.0 for x in [100.0, 100.0, 100.0, 100.0, 1.745, 1.745, 1.745]
             ],
             position_i_gains=[0.174, 0.174, 0.174, 0.174, 0.174, 0.174, 0.0],
             position_d_gains=[0.174, 0.174, 0.174, 0.174, 0.174, 0.174, 0.0],
@@ -1284,22 +1312,33 @@ s = Settings(
             flip=False,
         ),
     ],
-    sim_frequency=100.0,  # Simulation frequency in Hz (set to None to keep default)
+    physics_frequency=100.0,  # Physics frequency in Hz (set to None to keep default)
+    render_frequency=30.0,  # Render frequency in Hz (set to None to keep default)
 )
 
 #######################################################################################
 #######################################################################################
 #######################################################################################
 
-set_sim_frequency(s.sim_frequency)
+set_sim_frequencies(s.physics_frequency, s.render_frequency)
 keys = og.Controller.Keys
 create_graph(
-    [
-        create_basic_nodes(keys, s),
+    path=s.sensors_graph_path,
+    pipeline_stage=og.GraphPipelineStage.GRAPH_PIPELINE_STAGE_ONDEMAND,
+    actions_list=[
+        create_basic_nodes_sensors(keys, s),
         create_ros2_clock_publisher(keys),
         create_control_board_compounds(keys, s),
         create_imu_compounds(keys, s),
-        create_camera_compounds(keys, s),
         create_ft_compounds(keys, s),
-    ]
+    ],
+)
+
+create_graph(
+    path=s.camera_graph_path,
+    pipeline_stage=og.GraphPipelineStage.GRAPH_PIPELINE_STAGE_SIMULATION,
+    actions_list=[
+        create_basic_nodes_camera(keys, s),
+        create_camera_compounds(keys, s),
+    ],
 )

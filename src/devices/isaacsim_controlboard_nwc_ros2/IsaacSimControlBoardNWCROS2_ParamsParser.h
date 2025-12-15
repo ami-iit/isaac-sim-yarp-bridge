@@ -8,7 +8,7 @@
 // This is an automatically generated file. Please do not edit it.
 // It will be re-generated if the cmake flag ALLOW_DEVICE_PARAM_PARSER_GERNERATION is ON.
 
-// Generated on: Mon Dec  1 16:06:02 2025
+// Generated on: Sun Dec  7 10:53:08 2025
 
 
 #ifndef ISAACSIMCONTROLBOARDNWCROS2_PARAMSPARSER_H
@@ -23,24 +23,24 @@
 * This class is the parameters parser for class IsaacSimControlBoardNWCROS2.
 *
 * These are the used parameters:
-* | Group name | Parameter name              | Type   | Units   | Default Value               | Required | Description                                                           | Notes                                                           |
-* |:----------:|:---------------------------:|:------:|:-------:|:---------------------------:|:--------:|:---------------------------------------------------------------------:|:---------------------------------------------------------------:|
-* | -          | streaming_node_name         | string | -       | ControlBoardBridgeStreaming | 0        | Set the name for the ROS node streaming and receiving the state       | Must not start with a leading '/'                               |
-* | -          | service_node_name           | string | -       | ControlBoardBridgeService   | 0        | Set the name for the ROS node connecting to the services              | Must not start with a leading '/'                               |
-* | -          | joint_state_topic_name      | string | -       | -                           | 1        | Specify the name of the joint state topic to connect                  | The message type is JointState. Should start with a leading '/' |
-* | -          | motor_state_topic_name      | string | -       | -                           | 1        | Specify the name of the motor state topic to connect                  | The message type is JointState. Should start with a leading '/' |
-* | -          | joint_references_topic_name | string | -       | -                           | 1        | Specify the name of the topic to open to publish the joint references | The message type is JointState. Should start with a leading '/' |
-* | -          | get_parameters_service_name | string | -       | -                           | 1        | Specify the name of the service for getting parameters from IsaacSim  | Should start with a leading '/'                                 |
-* | -          | set_parameters_service_name | string | -       | -                           | 1        | Specify the name of the service for setting parameters to IsaacSim    | Should start with a leading '/'                                 |
-* | -          | service_request_timeout     | double | seconds | 0.5                         | 0        | Specify the timeout value for getting and setting parameters          | Should start with a leading '/'                                 |
+* | Group name | Parameter name              | Type   | Units   | Default Value               | Required | Description                                                           | Notes                                                               |
+* |:----------:|:---------------------------:|:------:|:-------:|:---------------------------:|:--------:|:---------------------------------------------------------------------:|:-------------------------------------------------------------------:|
+* | -          | streaming_node_name         | string | -       | ControlBoardBridgeStreaming | 0        | Set the name for the ROS node streaming and receiving the state       | Must not start with a leading '/'                                   |
+* | -          | service_node_name           | string | -       | ControlBoardBridgeService   | 0        | Set the name for the ROS node connecting to the services              | Must not start with a leading '/'                                   |
+* | -          | joint_state_topic_name      | string | -       | -                           | 1        | Specify the name of the joint state topic to connect                  | The message type is JointState. Should start with a leading '/'     |
+* | -          | motor_state_topic_name      | string | -       | -                           | 1        | Specify the name of the motor state topic to connect                  | The message type is JointState. Should start with a leading '/'     |
+* | -          | joint_references_topic_name | string | -       | -                           | 1        | Specify the name of the topic to open to publish the joint references | The message type is JointState. Should start with a leading '/'     |
+* | -          | parameter_events_topic_name | string | -       | -                           | 1        | Specify the name of the parameter events topic for getting parameters | The message type is ParameterEvent. Should start with a leading '/' |
+* | -          | set_parameters_service_name | string | -       | -                           | 1        | Specify the name of the service for setting parameters to IsaacSim    | Should start with a leading '/'                                     |
+* | -          | requests_timeout            | double | seconds | 0.5                         | 0        | Specify the timeout value for setting and getting parameters          | -                                                                   |
 *
 * The device can be launched by yarpdev using one of the following examples (with and without all optional parameters):
 * \code{.unparsed}
-* yarpdev --device IsaacSimControlBoardNWCROS2 --streaming_node_name ControlBoardBridgeStreaming --service_node_name ControlBoardBridgeService --joint_state_topic_name <mandatory_value> --motor_state_topic_name <mandatory_value> --joint_references_topic_name <mandatory_value> --get_parameters_service_name <mandatory_value> --set_parameters_service_name <mandatory_value> --service_request_timeout 0.5
+* yarpdev --device IsaacSimControlBoardNWCROS2 --streaming_node_name ControlBoardBridgeStreaming --service_node_name ControlBoardBridgeService --joint_state_topic_name <mandatory_value> --motor_state_topic_name <mandatory_value> --joint_references_topic_name <mandatory_value> --parameter_events_topic_name <mandatory_value> --set_parameters_service_name <mandatory_value> --requests_timeout 0.5
 * \endcode
 *
 * \code{.unparsed}
-* yarpdev --device IsaacSimControlBoardNWCROS2 --joint_state_topic_name <mandatory_value> --motor_state_topic_name <mandatory_value> --joint_references_topic_name <mandatory_value> --get_parameters_service_name <mandatory_value> --set_parameters_service_name <mandatory_value>
+* yarpdev --device IsaacSimControlBoardNWCROS2 --joint_state_topic_name <mandatory_value> --motor_state_topic_name <mandatory_value> --joint_references_topic_name <mandatory_value> --parameter_events_topic_name <mandatory_value> --set_parameters_service_name <mandatory_value>
 * \endcode
 *
 */
@@ -69,18 +69,18 @@ public:
     const std::string m_joint_state_topic_name_defaultValue = {""};
     const std::string m_motor_state_topic_name_defaultValue = {""};
     const std::string m_joint_references_topic_name_defaultValue = {""};
-    const std::string m_get_parameters_service_name_defaultValue = {""};
+    const std::string m_parameter_events_topic_name_defaultValue = {""};
     const std::string m_set_parameters_service_name_defaultValue = {""};
-    const std::string m_service_request_timeout_defaultValue = {"0.5"};
+    const std::string m_requests_timeout_defaultValue = {"0.5"};
 
     std::string m_streaming_node_name = {"ControlBoardBridgeStreaming"};
     std::string m_service_node_name = {"ControlBoardBridgeService"};
     std::string m_joint_state_topic_name = {}; //This default value is autogenerated. It is highly recommended to provide a suggested value also for mandatory parameters.
     std::string m_motor_state_topic_name = {}; //This default value is autogenerated. It is highly recommended to provide a suggested value also for mandatory parameters.
     std::string m_joint_references_topic_name = {}; //This default value is autogenerated. It is highly recommended to provide a suggested value also for mandatory parameters.
-    std::string m_get_parameters_service_name = {}; //This default value is autogenerated. It is highly recommended to provide a suggested value also for mandatory parameters.
+    std::string m_parameter_events_topic_name = {}; //This default value is autogenerated. It is highly recommended to provide a suggested value also for mandatory parameters.
     std::string m_set_parameters_service_name = {}; //This default value is autogenerated. It is highly recommended to provide a suggested value also for mandatory parameters.
-    double m_service_request_timeout = {0.5};
+    double m_requests_timeout = {0.5};
 
     bool          parseParams(const yarp::os::Searchable & config) override;
     std::string   getDeviceClassName() const override { return m_device_classname; }

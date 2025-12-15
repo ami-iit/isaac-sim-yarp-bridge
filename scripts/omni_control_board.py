@@ -10,19 +10,20 @@
 #                    Use db.log_error, db.log_warning to report problems in the compute function.
 #    og: The omni.graph.core module
 
-# Expects 36 inputs:
+# Expects 37 inputs:
 # - timestamp [double]: The current simulation time (in seconds)
 # - deltaTime [double]: Time passed since last compute (in seconds)
 # - reference_joint_names [token[]]: The list of joint names for the input reference commands.
 # - reference_position_commands [double[]]: The list of joint position commands.
 # - reference_velocity_commands [double[]]: The list of joint velocity commands.
 # - reference_effort_commands [double[]]: The list of joint effort commands.
+# - reference_timestamp [double]: The timestamp associated with the references.
 # - robot_prim [target]: The robot prim. Read only during setup.
 # - domain_id [uchar]: The ROS2 domain ID (optional). Read only during setup.
 # - useDomainIDEnvVar [bool]: Define whether to get the domain ID from an env var or not (optional). Read only during setup.
 # - node_name [str]: The ROS2 node name. Read only during setup.
 # - node_set_parameters_service_name [str]: The ROS2 set parameters service name. Read only during setup.
-# - node_get_parameters_service_name [str]: The ROS2 get parameters service name. Read only during setup.
+# - node_parameters_event_topic_name [str]: The ROS2 parameter events topic name. Read only during setup.
 # - node_state_topic_name [str]: The ROS2 joint state topic name. Read only during setup.
 # - node_motor_state_topic_name [str]: The ROS2 motor state topic name. Read only during setup.
 # - node_timeout [double]: The ROS2 node timeout (in seconds). Read only during setup.
@@ -61,8 +62,13 @@ import numpy as np
 import omni.graph.core as og
 import rclpy
 from isaacsim.core.api.robots import RobotView
-from rcl_interfaces.msg import ParameterType, ParameterValue, SetParametersResult
-from rcl_interfaces.srv import GetParameters as GetParametersSrv
+from rcl_interfaces.msg import (
+    Parameter,
+    ParameterEvent,
+    ParameterType,
+    ParameterValue,
+    SetParametersResult,
+)
 from rcl_interfaces.srv import SetParameters as SetParametersSrv
 from rclpy.context import Context as ROS2Context
 from rclpy.executors import SingleThreadedExecutor
@@ -75,7 +81,7 @@ class ControlBoardSettings:
     # Node settings
     node_name: str
     node_set_parameters_service_name: str
-    node_get_parameters_service_name: str
+    node_parameters_event_topic_name: str
     node_state_topic_name: str
     node_motor_state_topic_name: str
     node_timeout: float
@@ -110,9 +116,16 @@ class ControlBoardSettings:
 class ControlMode(enum.IntEnum):
     @staticmethod
     def create_vocab_32(a, b=chr(0), c=chr(0), d=chr(0)):
-        return (ord(a)) + (ord(b) << 8) + (ord(c) << 16) + (ord(d) << 24)
+        def to_byte(x):
+            x = ord(x)
+            return x & 0xFF
+
+        value = to_byte(a) | (to_byte(b) << 8) | (to_byte(c) << 16) | (to_byte(d) << 24)
+
+        return value
 
     IDLE = create_vocab_32("i", "d", "l")  # VOCAB_CM_IDLE
+    FORCE_IDLE = create_vocab_32("f", "i", "d", "l")  # VOCAB_CM_FORCE_IDLE
     POSITION = create_vocab_32("p", "o", "s")  # VOCAB_CM_POSITION
     POSITION_DIRECT = create_vocab_32("p", "o", "s", "d")  # VOCAB_CM_POSITION_DIRECT
     VELOCITY = create_vocab_32("v", "e", "l")  # VOCAB_CM_VELOCITY
@@ -247,20 +260,26 @@ class ControlBoardState:
 
         # Get joint limits from the robot
         dof_limits = robot.get_dof_limits()
-        self.min_positions = [dof_limits[0][j][0] for j in joint_indices]
-        self.max_positions = [dof_limits[0][j][1] for j in joint_indices]
-        self.max_velocities = robot.get_joint_max_velocities(
-            joint_indices=joint_indices
-        ).squeeze()
-        self.max_efforts = robot.get_max_efforts(joint_indices=joint_indices).squeeze()
+        self.min_positions = [float(dof_limits[0][j][0]) for j in joint_indices]
+        self.max_positions = [float(dof_limits[0][j][1]) for j in joint_indices]
+        self.max_velocities = (
+            robot.get_joint_max_velocities(joint_indices=joint_indices)
+            .squeeze()
+            .tolist()
+        )
+        self.max_efforts = (
+            robot.get_max_efforts(joint_indices=joint_indices).squeeze().tolist()
+        )
 
         # Get the home positions from the robot
         default_state = robot.get_joints_default_state()
         default_positions = default_state.positions[0]
-        self.home_positions = [default_positions[j] for j in joint_indices]
+        self.home_positions = [float(default_positions[j]) for j in joint_indices]
 
         # Get the joint types from the robot
-        self.joint_types = robot.get_dof_types(dof_names=self.joint_names)
+        self.joint_types = [
+            int(j) for j in robot.get_dof_types(dof_names=self.joint_names)
+        ]
 
 
 class ControlBoardNode(ROS2Node):
@@ -268,7 +287,7 @@ class ControlBoardNode(ROS2Node):
         self,
         node_name: str,
         set_service_name: str,
-        get_service_name: str,
+        parameter_events_topic_name: str,
         state_topic_name: str,
         motor_state_topic_name: str,
         context,
@@ -278,8 +297,8 @@ class ControlBoardNode(ROS2Node):
         self.set_srv = self.create_service(
             SetParametersSrv, set_service_name, self.callback_set_parameters
         )
-        self.get_srv = self.create_service(
-            GetParametersSrv, get_service_name, self.callback_get_parameters
+        self.parameter_event_pub = self.create_publisher(
+            ParameterEvent, parameter_events_topic_name, 10
         )
         self.state_pub = self.create_publisher(JointState, state_topic_name, 10)
         self.motor_state_pub = self.create_publisher(
@@ -287,6 +306,11 @@ class ControlBoardNode(ROS2Node):
         )
 
         self.state = state
+        self.parameter_names = [
+            name
+            for name, value in vars(self.state).items()
+            if isinstance(value, (list, np.ndarray))
+        ]
 
     def set_vector_parameter(self, name: str, value: list):
         if hasattr(self.state, name):
@@ -332,6 +356,9 @@ class ControlBoardNode(ROS2Node):
             vec = getattr(self.state, name)
             if len(vec) == 0:
                 output.type = ParameterType.PARAMETER_NOT_SET
+            elif all(isinstance(v, bool) for v in vec):
+                output.type = ParameterType.PARAMETER_BOOL_ARRAY
+                output.bool_array_value = getattr(self.state, name)
             elif all(isinstance(v, int) for v in vec):
                 output.type = ParameterType.PARAMETER_INTEGER_ARRAY
                 output.integer_array_value = getattr(self.state, name)
@@ -341,48 +368,12 @@ class ControlBoardNode(ROS2Node):
             elif all(isinstance(v, str) for v in vec):
                 output.type = ParameterType.PARAMETER_STRING_ARRAY
                 output.string_array_value = getattr(self.state, name)
-            elif all(isinstance(v, bool) for v in vec):
-                output.type = ParameterType.PARAMETER_BOOL_ARRAY
-                output.bool_array_value = getattr(self.state, name)
             else:
                 output.type = ParameterType.PARAMETER_NOT_SET
                 print(
                     f"Unsupported type for parameter {name}: {[type(v) for v in vec]}. "
                     f"This should not have happened!"
                 )
-        return output
-
-    def get_scalar_parameter(self, name: str, index: int):
-        output = ParameterValue()
-        output.type = ParameterType.PARAMETER_NOT_SET
-        if hasattr(self.state, name):
-            vec = getattr(self.state, name)
-            if 0 <= index < len(vec):
-                v = vec[index]
-                if isinstance(v, int):
-                    output.type = ParameterType.PARAMETER_INTEGER
-                    output.integer_value = v
-                elif isinstance(v, float):
-                    output.type = ParameterType.PARAMETER_DOUBLE
-                    output.double_value = v
-                elif isinstance(v, str):
-                    output.type = ParameterType.PARAMETER_STRING
-                    output.string_value = v
-                elif isinstance(v, bool):
-                    output.type = ParameterType.PARAMETER_BOOL
-                    output.bool_value = v
-                else:
-                    print(
-                        f"Unsupported type for parameter {name}[{index}]: {type(v)}. "
-                        f"This should not have happened!"
-                    )
-            else:
-                output.type = ParameterType.PARAMETER_NOT_SET
-                print(
-                    f"Index {index} out of range for parameter {name} "
-                    f"with size {len(vec)}. This should not have happened!"
-                )
-
         return output
 
     @staticmethod
@@ -415,17 +406,22 @@ class ControlBoardNode(ROS2Node):
         response.results = results
         return response
 
-    def callback_get_parameters(self, request, response):
-        results = []
-        for n in request.names:
-            name, index = self.extract_indexed_name(n)
-            if index is not None:
-                param_value = self.get_scalar_parameter(name, index)
-            else:
-                param_value = self.get_vector_parameter(name)
-            results.append(param_value)
-        response.values = results
-        return response
+    def build_parameter_message(self, name: str):
+        param_msg = Parameter()
+        param_msg.name = name
+        param_msg.value = self.get_vector_parameter(name)
+        return param_msg
+
+    def publish_parameter_event(self):
+        event = ParameterEvent()
+        event.stamp = self.get_clock().now().to_msg()
+        event.node = self.get_fully_qualified_name()
+
+        for name in self.parameter_names:
+            param_msg = self.build_parameter_message(name)
+            event.changed_parameters.append(param_msg)
+
+        self.parameter_event_pub.publish(event)
 
     def publish_joint_state(self, timestamp, positions, velocities, efforts):
         msg = JointState()
@@ -777,6 +773,7 @@ class ControlBoardData:
         self.executor = None
         self.robot = None
         self.robot_joint_indices = None
+        self.previous_timestamp = None
         self.initialized = False
 
 
@@ -811,7 +808,7 @@ def fill_settings_from_db(db: og.Database) -> ControlBoardSettings:
     s = ControlBoardSettings(
         node_name=db.inputs.node_name,
         node_set_parameters_service_name=db.inputs.node_set_parameters_service_name,
-        node_get_parameters_service_name=db.inputs.node_get_parameters_service_name,
+        node_parameters_event_topic_name=db.inputs.node_parameters_event_topic_name,
         node_state_topic_name=db.inputs.node_state_topic_name,
         node_motor_state_topic_name=db.inputs.node_motor_state_topic_name,
         node_timeout=db.inputs.node_timeout,
@@ -879,6 +876,11 @@ def create_robot_object_cb(db: og.Database, name, joint_names):
         db.log_error(f"The specified prim ({robot_prim}) is not a robot")
         return None
     robot = RobotView(prim_paths_expr=str(robot_prim.GetPath()), name=name)
+
+    if robot.dof_names is None:
+        db.log_error("Failed to create the RobotView. Should try to setup again.")
+        return None
+
     robot.initialize()
 
     joint_indices = []
@@ -923,7 +925,7 @@ def setup_cb(db: og.Database):
     db.per_instance_state.node = ControlBoardNode(
         node_name=settings.node_name,
         set_service_name=settings.node_set_parameters_service_name,
-        get_service_name=settings.node_get_parameters_service_name,
+        parameter_events_topic_name=settings.node_parameters_event_topic_name,
         state_topic_name=settings.node_state_topic_name,
         motor_state_topic_name=settings.node_motor_state_topic_name,
         context=db.per_instance_state.context,
@@ -934,6 +936,7 @@ def setup_cb(db: og.Database):
     )
     db.per_instance_state.executor.add_node(db.per_instance_state.node)
 
+    db.per_instance_state.previous_timestamp = None
     db.per_instance_state.initialized = True
 
 
@@ -967,6 +970,7 @@ def get_pid_output(
     max_velocity: float,
     max_effort: float,
     max_current: float,
+    reference_timestamp_has_changed: bool,
 ) -> float:
     script_state = db.per_instance_state
     cb_state = script_state.state
@@ -995,6 +999,7 @@ def get_pid_output(
     def get_reference(field):
         if (
             has_reference_name
+            and reference_timestamp_has_changed
             and hasattr(db.inputs, field)
             and getattr(db.inputs, field) is not None
             and reference_index < len(getattr(db.inputs, field))
@@ -1019,6 +1024,15 @@ def get_pid_output(
     reference_current = get_reference("reference_effort_commands")
     if reference_current:
         reference_current = max(min(reference_current, max_current), -max_current)
+
+    if (
+        cb_state.previous_control_modes[joint_index] == ControlMode.HARDWARE_FAULT
+        and control_mode != ControlMode.HARDWARE_FAULT
+    ):
+        if control_mode != ControlMode.FORCE_IDLE:
+            cb_state.control_modes[joint_index] = ControlMode.HARDWARE_FAULT
+            control_mode = ControlMode.HARDWARE_FAULT
+            db.log_error("Can use only FORCE_IDLE to reset from HARDWARE_FAULT")
 
     if (
         control_mode == ControlMode.POSITION
@@ -1174,7 +1188,11 @@ def get_pid_output(
         current_dict["torque"] = output_torque
         return output_torque
 
-    elif control_mode == ControlMode.IDLE or control_mode == ControlMode.HARDWARE_FAULT:
+    elif control_mode == ControlMode.IDLE or control_mode == ControlMode.FORCE_IDLE:
+        cb_state.control_modes[joint_index] = ControlMode.IDLE
+        cb_state.previous_control_modes[joint_index] = ControlMode.IDLE
+        return 0.0
+    elif control_mode == ControlMode.HARDWARE_FAULT:
         cb_state.previous_control_modes[joint_index] = control_mode
         return 0.0
     else:
@@ -1211,31 +1229,33 @@ def update_state(db: og.Database):
         if position_pid:
             reference = position_pid.get_reference()
             if reference:
-                cb_state.position_pid_references[i] = reference
+                cb_state.position_pid_references[i] = float(reference)
 
-            cb_state.position_pid_errors[i] = position_pid.get_error()
-            cb_state.position_pid_outputs[i] = position_pid.get_output()
+            cb_state.position_pid_errors[i] = float(position_pid.get_error())
+            cb_state.position_pid_outputs[i] = float(position_pid.get_output())
             if position_pid.smoother:
-                cb_state.is_motion_done[i] = position_pid.smoother.trajectory_completed
-                cb_state.position_pid_reference_velocities[i] = (
+                cb_state.is_motion_done[i] = bool(
+                    position_pid.smoother.trajectory_completed
+                )
+                cb_state.position_pid_reference_velocities[i] = float(
                     position_pid.smoother.speed
                 )
 
         if velocity_pid:
             reference = velocity_pid.get_reference()
             if reference:
-                cb_state.velocity_pid_references[i] = reference
+                cb_state.velocity_pid_references[i] = float(reference)
 
-            cb_state.velocity_pid_errors[i] = velocity_pid.get_error()
-            cb_state.velocity_pid_outputs[i] = velocity_pid.get_output()
+            cb_state.velocity_pid_errors[i] = float(velocity_pid.get_error())
+            cb_state.velocity_pid_outputs[i] = float(velocity_pid.get_output())
 
         if torque_reference is not None:
-            cb_state.torque_pid_references[i] = torque_reference
-            cb_state.torque_pid_outputs[i] = torque_reference
+            cb_state.torque_pid_references[i] = float(torque_reference)
+            cb_state.torque_pid_outputs[i] = float(torque_reference)
 
         if current_dict is not None:
-            cb_state.current_pid_references[i] = current_dict["reference"]
-            cb_state.current_pid_outputs[i] = current_dict["torque"]
+            cb_state.current_pid_references[i] = float(current_dict["reference"])
+            cb_state.current_pid_outputs[i] = float(current_dict["torque"])
 
 
 def reset_requested_pids(db: og.Database):
@@ -1349,6 +1369,16 @@ def compute(db: og.Database):
 
     reset_requested_pids(db)
 
+    reference_timestamp_has_changed = False
+    if hasattr(db.inputs, "reference_timestamp"):
+        reference_timestamp = getattr(db.inputs, "reference_timestamp")
+        if reference_timestamp is not None and (
+            db.per_instance_state.previous_timestamp is None
+            or db.per_instance_state.previous_timestamp != reference_timestamp
+        ):
+            reference_timestamp_has_changed = True
+            db.per_instance_state.previous_timestamp = reference_timestamp
+
     output_effort = []
     motor_positions = [0.0] * len(cb_state.joint_names)
     motor_velocities = [0.0] * len(cb_state.joint_names)
@@ -1400,6 +1430,7 @@ def compute(db: og.Database):
             max_velocity=max_velocity,
             max_effort=max_effort,
             max_current=max_current,
+            reference_timestamp_has_changed=reference_timestamp_has_changed,
         )
         effort = max(min(effort, max_effort), -max_effort)
         output_effort.append(effort)
@@ -1407,6 +1438,9 @@ def compute(db: og.Database):
     db.outputs.desired_efforts = output_effort
 
     update_state(db)
+
+    # Stream all parameters as changed after updating the internal state
+    script_state.node.publish_parameter_event()
 
     timestamp = (
         db.inputs.timestamp

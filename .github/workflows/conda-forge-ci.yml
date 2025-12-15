@@ -27,13 +27,13 @@ jobs:
       with:
         miniforge-variant: Miniforge3
         miniforge-version: latest
-        channels: conda-forge,robostack-jazzy
+        channels: conda-forge,robostack-jazzy,robotology
         channel-priority: true
         conda-remove-defaults: true
 
     - name: Dependencies
       run: |
-        conda install cxx-compiler cmake pkg-config make ninja colcon-common-extensions catkin_tools rosdep ros-jazzy-desktop yarp catch2
+        conda install cxx-compiler cmake pkg-config make ninja colcon-common-extensions catkin_tools rosdep ros-jazzy-desktop yarp catch2 ergocub-software whole-body-estimators walking-controllers
 
     - name: Environment [Linux]
       if: contains(matrix.os, 'ubuntu')
@@ -80,6 +80,7 @@ jobs:
 
     - name: Test [Linux]
       if: contains(matrix.os, 'ubuntu')
+      timeout-minutes: 10
       run: |
         cd build
         yarp namespace /test
@@ -90,6 +91,7 @@ jobs:
     - name: Test [Windows]
       if: contains(matrix.os, 'windows')
       shell: cmd /C CALL {0}
+      timeout-minutes: 10
       run: |
         cd build
         yarp namespace /test
